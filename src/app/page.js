@@ -72,7 +72,7 @@ export default function Dashboard() {
   const [usdtAddress, setUsdtAddress] = useState(DEFAULT_USDT_ADDRESS);
 
   // Form states
-  const [depositAmount, setDepositAmount] = useState("250");
+  const [depositAmount, setDepositAmount] = useState("10");
   const [sponsorAddress, setSponsorAddress] = useState("");
   const [withdrawAmount, setWithdrawAmount] = useState("");
   const [withdrawAddressInput, setWithdrawAddressInput] = useState("");
