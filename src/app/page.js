@@ -760,6 +760,26 @@ export default function Dashboard() {
     parseFloat(pendingBalances.pendingPerf)
   ).toFixed(2);
 
+  // Capping Calculations (220% ROI / 400% Network)
+  const totalDepositsNum = parseFloat(userData.totalDeposits) || 0;
+  
+  const maxRoiCap = totalDepositsNum * 2.2;
+  const currentRoiEarned = 
+    parseFloat(userData.dailyROIEarned) +
+    parseFloat(userData.roiBoosterEarned) +
+    parseFloat(pendingBalances.pendingDaily) +
+    parseFloat(pendingBalances.pendingBooster);
+  const roiCapPercent = maxRoiCap > 0 ? Math.min((currentRoiEarned / maxRoiCap) * 100, 100) : 0;
+
+  const maxNetworkCap = totalDepositsNum * 4.0;
+  const currentNetworkEarned = 
+    parseFloat(userData.levelIncomeEarned) +
+    parseFloat(userData.levelROIEarned) +
+    parseFloat(userData.performanceBonusEarned) +
+    parseFloat(userData.registrationIncomeEarned) +
+    parseFloat(pendingBalances.pendingPerf);
+  const networkCapPercent = maxNetworkCap > 0 ? Math.min((currentNetworkEarned / maxNetworkCap) * 100, 100) : 0;
+
   // Recursive Component for Tree Rendering
   function TreeNodeComponent({ addr, depth = 0 }) {
     const normalizedAddr = addr.toLowerCase();
@@ -1154,6 +1174,41 @@ export default function Dashboard() {
                 {userData.totalWithdrawn} <span style={{ fontSize: "14px", color: "var(--text-muted)" }}>USDT</span>
               </div>
               <div className="sub">Lifetime payouts withdrawn to your wallet</div>
+            </div>
+          </div>
+
+          <div className="section-title">Income Capping Limits</div>
+          <div className="two-col" style={{ gridTemplateColumns: "1fr 1fr", gap: "20px", marginBottom: "25px" }}>
+            <div className="card" style={{ padding: "20px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "10px" }}>
+                <span style={{ fontWeight: "600", fontSize: "14px" }}>ROI Limit Cap (220% Max)</span>
+                <span className="mono" style={{ fontSize: "14px", color: "var(--blue-bright)" }}>
+                  {currentRoiEarned.toFixed(2)} / {maxRoiCap.toFixed(2)} USDT
+                </span>
+              </div>
+              <div className="progress-bg" style={{ background: "var(--surface-2)", height: "10px", borderRadius: "5px", overflow: "hidden", border: "1px solid var(--border)", position: "relative" }}>
+                <div className="progress-fill roi-fill" style={{ width: `${roiCapPercent}%`, height: "100%", transition: "width 0.3s ease" }}></div>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", marginTop: "8px", fontSize: "11px", color: "var(--text-muted)" }}>
+                <span>Includes Daily ROI & Booster ROI</span>
+                <span>{roiCapPercent.toFixed(1)}% Reached</span>
+              </div>
+            </div>
+
+            <div className="card" style={{ padding: "20px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "10px" }}>
+                <span style={{ fontWeight: "600", fontSize: "14px" }}>Network Limit Cap (400% Max)</span>
+                <span className="mono" style={{ fontSize: "14px", color: "var(--blue-bright)" }}>
+                  {currentNetworkEarned.toFixed(2)} / {maxNetworkCap.toFixed(2)} USDT
+                </span>
+              </div>
+              <div className="progress-bg" style={{ background: "var(--surface-2)", height: "10px", borderRadius: "5px", overflow: "hidden", border: "1px solid var(--border)", position: "relative" }}>
+                <div className="progress-fill network-fill" style={{ width: `${networkCapPercent}%`, height: "100%", transition: "width 0.3s ease" }}></div>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", marginTop: "8px", fontSize: "11px", color: "var(--text-muted)" }}>
+                <span>Includes Level, Matching, Perf, & Reg Income</span>
+                <span>{networkCapPercent.toFixed(1)}% Reached</span>
+              </div>
             </div>
           </div>
 

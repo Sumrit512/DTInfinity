@@ -481,3 +481,16 @@ tbody tr:last-child td{border-bottom:none;}
   display: none;
 }
 
+/* Progress fill styles */
+.progress-fill {
+  border-radius: 5px;
+}
+.progress-fill.roi-fill {
+  background: linear-gradient(90deg, #f2a93b, #f2c94c);
+  box-shadow: 0 0 10px rgba(242, 169, 59, 0.4);
+}
+.progress-fill.network-fill {
+  background: linear-gradient(90deg, #5ec8f2, #8c52ff);
+  box-shadow: 0 0 10px rgba(94, 200, 242, 0.4);
+}
+
