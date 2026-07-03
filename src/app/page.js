@@ -63,6 +63,10 @@ export default function Dashboard() {
   const [isWrongNetwork, setIsWrongNetwork] = useState(false);
   const [targetChainId, setTargetChainId] = useState(97n);
 
+  const [treeRoot, setTreeRoot] = useState("");
+  const [treeNodes, setTreeNodes] = useState({});
+  const [selectedNode, setSelectedNode] = useState("");
+
   // Contract Addresses (Configurable by user)
   const [dtInfinityAddress, setDtInfinityAddress] = useState(DEFAULT_DT_INFINITY_ADDRESS);
   const [usdtAddress, setUsdtAddress] = useState(DEFAULT_USDT_ADDRESS);
@@ -262,6 +266,49 @@ export default function Dashboard() {
     }
   }
 
+  // Load a single node in the network tree
+  async function loadTreeNode(addr, dtContractInstance = null) {
+    if (!addr || addr === ethers.ZeroAddress) return;
+    try {
+      let contract = dtContractInstance;
+      if (!contract) {
+        if (!window.ethereum) return;
+        const provider = new ethers.BrowserProvider(window.ethereum);
+        contract = new ethers.Contract(dtInfinityAddress, DT_INFINITY_ABI, provider);
+      }
+      
+      const registered = await contract.isUserRegistered(addr);
+      if (!registered) return;
+      
+      const [basicInfo, networkInfo, directs] = await Promise.all([
+        contract.getUserBasicInfo(addr),
+        contract.getUserNetworkInfo(addr),
+        contract.getDirectReferrals(addr)
+      ]);
+      
+      const nodeData = {
+        address: addr,
+        sponsor: basicInfo.sponsor,
+        totalDeposits: formatUSDT(basicInfo.totalDeposits),
+        registrationTime: Number(basicInfo.registrationTime),
+        directCount: Number(networkInfo.directCount),
+        qualifiedDirectsCount: Number(networkInfo.qualifiedDirectsCount),
+        totalTeamCount: Number(networkInfo.totalTeamCount),
+        totalTeamVolume: formatUSDT(networkInfo.totalTeamVolume),
+        strongestLegAddress: networkInfo.strongestLegAddress,
+        strongestLegVolume: formatUSDT(networkInfo.strongestLegVolume),
+        children: directs
+      };
+      
+      setTreeNodes(prev => ({
+        ...prev,
+        [addr.toLowerCase()]: nodeData
+      }));
+    } catch (e) {
+      console.error("Failed to load tree node", addr, e);
+    }
+  }
+
   // Reload data from blockchain
   async function loadBlockchainData(addr) {
     if (!window.ethereum) return;
@@ -331,6 +378,27 @@ export default function Dashboard() {
           strongestLegVolume: formatUSDT(networkInfo.strongestLegVolume),
           boosterRate: (Number(boosterRate) / 100).toFixed(1) + "%"
         });
+
+        setTreeRoot(addr);
+        setTreeNodes(prev => ({
+          ...prev,
+          [addr.toLowerCase()]: {
+            address: addr,
+            sponsor: basicInfo.sponsor,
+            totalDeposits: formatUSDT(basicInfo.totalDeposits),
+            registrationTime: Number(basicInfo.registrationTime),
+            directCount: Number(networkInfo.directCount),
+            qualifiedDirectsCount: Number(networkInfo.qualifiedDirectsCount),
+            totalTeamCount: Number(networkInfo.totalTeamCount),
+            totalTeamVolume: formatUSDT(networkInfo.totalTeamVolume),
+            strongestLegAddress: networkInfo.strongestLegAddress,
+            strongestLegVolume: formatUSDT(networkInfo.strongestLegVolume),
+            children: directs
+          }
+        }));
+        if (!selectedNode) {
+          setSelectedNode(addr);
+        }
 
         setPendingBalances({
           pendingDaily: formatUSDT(pending.pendingDaily),
@@ -692,6 +760,54 @@ export default function Dashboard() {
     parseFloat(pendingBalances.pendingPerf)
   ).toFixed(2);
 
+  // Recursive Component for Tree Rendering
+  function TreeNodeComponent({ addr, depth = 0 }) {
+    const normalizedAddr = addr.toLowerCase();
+    const node = treeNodes[normalizedAddr];
+    const isExpanded = !!node;
+    const isSelected = selectedNode?.toLowerCase() === normalizedAddr;
+
+    const handleNodeClick = async (e) => {
+      e.stopPropagation();
+      setSelectedNode(addr);
+      if (!isExpanded) {
+        setLoading(true);
+        await loadTreeNode(addr);
+        setLoading(false);
+      }
+    };
+
+    return (
+      <div className="tree-branch-wrapper">
+        <div 
+          className={`tree-node-card ${isSelected ? 'selected' : ''} ${isExpanded ? 'expanded' : 'collapsed'}`}
+          onClick={handleNodeClick}
+        >
+          <div className="tree-node-icon">
+            {depth === 0 ? "👑" : "👤"}
+          </div>
+          <div className="tree-node-info">
+            <div className="tree-node-addr mono">{shorten(addr)}</div>
+            {node && (
+              <div className="tree-node-meta">
+                <span>Pkg: {parseFloat(node.totalDeposits).toFixed(0)}</span> · <span>Vol: {parseFloat(node.totalTeamVolume).toFixed(0)}</span>
+              </div>
+            )}
+            {!node && <div className="tree-node-meta click-to-expand">Click to expand</div>}
+          </div>
+        </div>
+
+        {isExpanded && node.children && node.children.length > 0 && (
+          <div className="tree-children-container">
+            {node.children.map((childAddr, idx) => (
+              <TreeNodeComponent key={idx} addr={childAddr} depth={depth + 1} />
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
   if (walletConnected && isWrongNetwork) {
     return (
       <div className="connect-landing">
@@ -719,6 +835,90 @@ export default function Dashboard() {
               onClick={() => {
                 setWalletConnected(false);
                 setIsWrongNetwork(false);
+              }}
+            >
+              Disconnect Wallet
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (walletConnected && !isWrongNetwork && !isRegistered) {
+    return (
+      <div className="connect-landing">
+        <div className="connect-card" style={{ maxWidth: "500px" }}>
+          <div className="connect-brand">
+            <img src="/logo.png" alt="DT Infinity Logo" style={{ height: "56px", objectFit: "contain", marginBottom: "16px" }} />
+            <p className="connect-subtitle" style={{ color: "var(--blue-bright)", fontWeight: "600", fontSize: "14px", textTransform: "uppercase", letterSpacing: "1.5px" }}>Join Platform</p>
+          </div>
+          
+          <div className="connect-divider"></div>
+          
+          <div className="connect-body" style={{ textAlign: "left" }}>
+            <div style={{ 
+              background: "rgba(94, 200, 242, 0.08)",
+              border: "1px solid var(--border)",
+              borderRadius: "10px",
+              padding: "12px 15px",
+              fontSize: "12.5px",
+              color: "var(--text-muted)",
+              lineHeight: "1.6",
+              marginBottom: "20px"
+            }}>
+              <strong style={{ color: "var(--blue-bright)" }}>Registration Required:</strong> To activate your node and participate in the Daily ROI & MLM Network, please enter your sponsor's address and execute your initial deposit (min 10 USDT).
+            </div>
+            
+            <form onSubmit={handleDeposit} style={{ display: "flex", flexDirection: "column", gap: "15px" }}>
+              <div className="field">
+                <label style={{ fontSize: "11.5px", textTransform: "uppercase", color: "var(--text-muted)", display: "block", marginBottom: "6px" }}>Your Wallet Address</label>
+                <input 
+                  type="text" 
+                  value={walletAddress} 
+                  disabled 
+                  style={{ width: "100%", background: "var(--surface-2)", border: "1px solid var(--border)", borderRadius: "10px", padding: "12px 14px", color: "var(--text-muted)", fontSize: "13px" }}
+                />
+              </div>
+
+              <div className="field">
+                <label style={{ fontSize: "11.5px", textTransform: "uppercase", color: "var(--text-muted)", display: "block", marginBottom: "6px" }}>Sponsor / Referrer Address</label>
+                <input 
+                  type="text" 
+                  placeholder="0x..." 
+                  value={sponsorAddress}
+                  onChange={(e) => setSponsorAddress(e.target.value)}
+                  required
+                  style={{ width: "100%", background: "var(--surface-2)", border: "1px solid var(--border)", borderRadius: "10px", padding: "12px 14px", color: "var(--text)", fontSize: "13.5px" }}
+                />
+              </div>
+
+              <div className="field">
+                <label style={{ fontSize: "11.5px", textTransform: "uppercase", color: "var(--text-muted)", display: "block", marginBottom: "6px" }}>Deposit Amount (Min 10 USDT)</label>
+                <div style={{ position: "relative" }}>
+                  <input 
+                    type="number" 
+                    placeholder="10" 
+                    value={depositAmount}
+                    onChange={(e) => setDepositAmount(e.target.value)}
+                    required
+                    style={{ width: "100%", background: "var(--surface-2)", border: "1px solid var(--border)", borderRadius: "10px", padding: "12px 14px", color: "var(--text)", fontSize: "13.5px" }}
+                  />
+                  <span style={{ position: "absolute", right: "14px", top: "50%", transform: "translateY(-50%)", fontSize: "12px", color: "var(--text-muted)", fontWeight: "600" }}>USDT</span>
+                </div>
+              </div>
+
+              <button className="connect-btn display" type="submit" disabled={loading} style={{ marginTop: "15px", marginBottom: "15px" }}>
+                {loading ? "Processing..." : "Approve & Register"}
+              </button>
+            </form>
+
+            <button 
+              className="copy-btn" 
+              style={{ width: "100%", padding: "10px", background: "transparent", color: "var(--text-muted)", border: "1px solid var(--border)" }}
+              onClick={() => {
+                setWalletConnected(false);
+                setWalletAddress("");
               }}
             >
               Disconnect Wallet
@@ -875,7 +1075,19 @@ export default function Dashboard() {
               <div className="addr">{walletConnected ? shorten(walletAddress) : "Not connected"}</div>
               <div className="net">{networkName}</div>
             </div>
-            {!walletConnected && (
+            {walletConnected ? (
+              <button 
+                onClick={() => {
+                  setWalletConnected(false);
+                  setIsWrongNetwork(false);
+                  setWalletAddress("");
+                }} 
+                className="copy-btn" 
+                style={{ padding: "8px 12px", fontSize: "11px", fontWeight: "600", border: "1px solid var(--border)" }}
+              >
+                Disconnect
+              </button>
+            ) : (
               <button id="connectBtn" onClick={connectWallet}>
                 {loading ? "Connecting..." : "Connect Wallet"}
               </button>
@@ -1128,30 +1340,98 @@ export default function Dashboard() {
             </div>
           </div>
 
-          <div className="card">
-            <div className="section-title" style={{ marginTop: 0 }}>Direct Referrals Downline</div>
-            {directsList.length === 0 ? (
-              <div style={{ color: "var(--text-muted)", fontSize: "13px", padding: "10px 0" }}>
-                No direct referrals found. Share your referral link to build your network!
+          <div className="two-col" style={{ gridTemplateColumns: "2fr 1fr", gap: "20px" }}>
+            <div className="card" style={{ overflow: "hidden" }}>
+              <div className="section-title" style={{ marginTop: 0 }}>Interactive Network Tree</div>
+              <p style={{ color: "var(--text-muted)", fontSize: "12px", marginBottom: "20px" }}>
+                Explore your hierarchical MLM tree. Click any node to load and expand its direct referrals. Click the crown icon to inspect the root.
+              </p>
+              
+              <div className="tree-canvas-container" style={{ display: "flex", justifyContent: "center" }}>
+                {treeRoot ? (
+                  <TreeNodeComponent addr={treeRoot} depth={0} />
+                ) : (
+                  <div style={{ color: "var(--text-muted)", fontSize: "13px" }}>Loading tree...</div>
+                )}
               </div>
-            ) : (
-              <table style={{ marginTop: "10px" }}>
-                <thead>
-                  <tr>
-                    <th>Address</th>
-                    <th>Subtree Volume</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {directsList.map((refAddr, idx) => (
-                    <tr key={idx}>
-                      <td className="mono" style={{ color: "var(--blue-bright)" }}>{refAddr}</td>
-                      <td className="mono">Leg matching enabled</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
+            </div>
+            
+            <div className="card">
+              <div className="section-title" style={{ marginTop: 0 }}>Node Details Inspector</div>
+              {selectedNode && treeNodes[selectedNode.toLowerCase()] ? (
+                (() => {
+                  const inspected = treeNodes[selectedNode.toLowerCase()];
+                  const strongVol = parseFloat(inspected.strongestLegVolume);
+                  const totalVol = parseFloat(inspected.totalTeamVolume);
+                  const otherVol = totalVol - strongVol;
+                  
+                  return (
+                    <div style={{ display: "flex", flexDirection: "column", gap: "15px" }}>
+                      <div className="team-stat" style={{ paddingBottom: "10px", borderBottom: "1px solid var(--border)" }}>
+                        <div className="k" style={{ fontSize: "11px" }}>Inspected Node</div>
+                        <div className="v mono" style={{ fontSize: "11.5px", wordBreak: "break-all", color: "var(--blue-bright)" }}>
+                          {inspected.address}
+                        </div>
+                      </div>
+                      
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+                        <div>
+                          <div className="k" style={{ fontSize: "10.5px", color: "var(--text-muted)" }}>Deposits</div>
+                          <div className="v mono" style={{ fontSize: "14px" }}>{parseFloat(inspected.totalDeposits).toFixed(0)} USDT</div>
+                        </div>
+                        <div>
+                          <div className="k" style={{ fontSize: "10.5px", color: "var(--text-muted)" }}>Directs</div>
+                          <div className="v" style={{ fontSize: "14px" }}>{inspected.directCount} ({inspected.qualifiedDirectsCount} active)</div>
+                        </div>
+                      </div>
+
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+                        <div>
+                          <div className="k" style={{ fontSize: "10.5px", color: "var(--text-muted)" }}>Team Count</div>
+                          <div className="v" style={{ fontSize: "14px" }}>{inspected.totalTeamCount} members</div>
+                        </div>
+                        <div>
+                          <div className="k" style={{ fontSize: "10.5px", color: "var(--text-muted)" }}>Team Volume</div>
+                          <div className="v mono" style={{ fontSize: "14px" }}>{parseFloat(inspected.totalTeamVolume).toFixed(0)} USDT</div>
+                        </div>
+                      </div>
+
+                      <div style={{ padding: "10px", background: "var(--surface-2)", borderRadius: "10px", border: "1px solid var(--border)", fontSize: "12px" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "6px" }}>
+                          <span style={{ color: "var(--text-muted)" }}>Sponsor:</span>
+                          <span className="mono" style={{ float: "right" }}>{inspected.sponsor !== ethers.ZeroAddress ? shorten(inspected.sponsor) : "None (Root)"}</span>
+                        </div>
+                        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "6px" }}>
+                          <span style={{ color: "var(--text-muted)" }}>Strong Leg:</span>
+                          <span className="mono" style={{ float: "right" }}>{strongVol.toFixed(0)} USDT</span>
+                        </div>
+                        <div style={{ display: "flex", justifyContent: "space-between" }}>
+                          <span style={{ color: "var(--text-muted)" }}>Other Legs:</span>
+                          <span className="mono" style={{ float: "right" }}>{otherVol.toFixed(0)} USDT</span>
+                        </div>
+                      </div>
+
+                      {inspected.children.length > 0 && (
+                        <div style={{ fontSize: "12px" }}>
+                          <div style={{ fontWeight: "600", color: "var(--text-muted)", marginBottom: "6px" }}>Direct Downlines ({inspected.children.length}):</div>
+                          <div style={{ display: "flex", flexDirection: "column", gap: "4px", maxHeight: "100px", overflowY: "auto", paddingRight: "5px" }}>
+                            {inspected.children.map((c, i) => (
+                              <div key={i} className="mono" style={{ color: "var(--text-muted)", fontSize: "11px" }}>
+                                · {c}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()
+              ) : (
+                <div style={{ color: "var(--text-muted)", fontSize: "13px", padding: "10px 0" }}>
+                  Click on any node in the tree diagram to inspect its MLM stats and display downlines.
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
