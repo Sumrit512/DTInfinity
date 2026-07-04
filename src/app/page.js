@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import { ethers } from "ethers";
 
 // Default contract addresses (placeholders that user can update in settings)
-const DEFAULT_DT_INFINITY_ADDRESS = "0x1e715b9da985ffa43859b164d0b1f36f024e72cc";
+const DEFAULT_DT_INFINITY_ADDRESS = "0x13e0d418131f7159fafd263fdb416bd052f88345";
 const DEFAULT_USDT_ADDRESS = "0x0aB8c2DfE9aD2e2D3f58E6006884cda5e6f1E7B9";
 
 // Simple USDT ABI
@@ -111,6 +111,26 @@ export default function Dashboard() {
 
   const [directsList, setDirectsList] = useState([]);
   const [origin, setOrigin] = useState("");
+  
+  // Real-time ticking simulation states
+  const [oneDay, setOneDay] = useState(86400n);
+  const [secondsSinceSync, setSecondsSinceSync] = useState(0);
+
+  // Mobile responsiveness sidebar state
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  useEffect(() => {
+    if (!walletConnected || !isRegistered) {
+      setSecondsSinceSync(0);
+      return;
+    }
+
+    const interval = setInterval(() => {
+      setSecondsSinceSync(prev => prev + 1);
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [walletConnected, isRegistered, userData.lastUpdateROI]);
 
   // Load saved contract configuration
   useEffect(() => {
@@ -280,10 +300,12 @@ export default function Dashboard() {
       const registered = await contract.isUserRegistered(addr);
       if (!registered) return;
       
-      const [basicInfo, networkInfo, directs] = await Promise.all([
+      const [basicInfo, networkInfo, directs, boosterRate, incomeInfo] = await Promise.all([
         contract.getUserBasicInfo(addr),
         contract.getUserNetworkInfo(addr),
-        contract.getDirectReferrals(addr)
+        contract.getDirectReferrals(addr),
+        contract.getBoosterRate(addr),
+        contract.getUserIncomeInfo(addr)
       ]);
       
       const nodeData = {
@@ -291,13 +313,17 @@ export default function Dashboard() {
         sponsor: basicInfo.sponsor,
         totalDeposits: formatUSDT(basicInfo.totalDeposits),
         registrationTime: Number(basicInfo.registrationTime),
+        lastUpdateROI: Number(basicInfo.lastUpdateROI),
         directCount: Number(networkInfo.directCount),
         qualifiedDirectsCount: Number(networkInfo.qualifiedDirectsCount),
         totalTeamCount: Number(networkInfo.totalTeamCount),
         totalTeamVolume: formatUSDT(networkInfo.totalTeamVolume),
         strongestLegAddress: networkInfo.strongestLegAddress,
         strongestLegVolume: formatUSDT(networkInfo.strongestLegVolume),
-        children: directs
+        children: directs,
+        boosterRate: Number(boosterRate) / 100,
+        dailyROIEarned: formatUSDT(incomeInfo.dailyROIEarned),
+        roiBoosterEarned: formatUSDT(incomeInfo.roiBoosterEarned)
       };
       
       setTreeNodes(prev => ({
@@ -338,6 +364,13 @@ export default function Dashboard() {
 
       // 2. Check registration and load user data
       const dtContract = new ethers.Contract(dtInfinityAddress, DT_INFINITY_ABI, provider);
+      try {
+        const oneDayVal = await dtContract.ONE_DAY();
+        setOneDay(oneDayVal);
+      } catch (e) {
+        console.warn("Could not read ONE_DAY", e);
+      }
+      
       let registered = false;
       try {
         registered = await dtContract.isUserRegistered(addr);
@@ -387,13 +420,17 @@ export default function Dashboard() {
             sponsor: basicInfo.sponsor,
             totalDeposits: formatUSDT(basicInfo.totalDeposits),
             registrationTime: Number(basicInfo.registrationTime),
+            lastUpdateROI: Number(basicInfo.lastUpdateROI),
             directCount: Number(networkInfo.directCount),
             qualifiedDirectsCount: Number(networkInfo.qualifiedDirectsCount),
             totalTeamCount: Number(networkInfo.totalTeamCount),
             totalTeamVolume: formatUSDT(networkInfo.totalTeamVolume),
             strongestLegAddress: networkInfo.strongestLegAddress,
             strongestLegVolume: formatUSDT(networkInfo.strongestLegVolume),
-            children: directs
+            children: directs,
+            boosterRate: Number(boosterRate) / 100,
+            dailyROIEarned: formatUSDT(incomeInfo.dailyROIEarned),
+            roiBoosterEarned: formatUSDT(incomeInfo.roiBoosterEarned)
           }
         }));
         if (!selectedNode) {
@@ -406,10 +443,19 @@ export default function Dashboard() {
           pendingPerf: formatUSDT(pending.pendingPerf)
         });
 
+        setSecondsSinceSync(0); // Reset timer on successful blockchain load
+
         setDirectsList(directs);
 
+        // Auto-load direct referrals (Level 1 downlines) details for Level ROI simulation
+        if (directs && directs.length > 0) {
+          Promise.all(directs.map(childAddr => loadTreeNode(childAddr, dtContract))).catch(e => {
+            console.warn("Failed to auto-load some direct referrals", e);
+          });
+        }
+
         // Load transaction logs from contract events
-        fetchEventLogs(dtContract, addr);
+        fetchEventLogs(dtContract, addr, basicInfo, incomeInfo);
       } else {
         // Reset user data for unregistered
         setUserData({
@@ -447,7 +493,7 @@ export default function Dashboard() {
   }
 
   // Query events to build a live transaction history
-  async function fetchEventLogs(dtContract, addr) {
+  async function fetchEventLogs(dtContract, addr, basicInfo = null, incomeInfo = null) {
     try {
       const provider = new ethers.BrowserProvider(window.ethereum);
       const currentBlock = await provider.getBlockNumber();
@@ -461,15 +507,13 @@ export default function Dashboard() {
       const filterBonus = dtContract.filters.PerformanceBonusAchieved(addr);
       const filterRegIncome = dtContract.filters.RegistrationIncomePaid(addr);
 
-      // Query events
-      const [depEvts, withEvts, incEvts, roiEvts, bonEvts, regIncEvts] = await Promise.all([
-        dtContract.queryFilter(filterDeposited, startBlock, currentBlock),
-        dtContract.queryFilter(filterWithdrawn, startBlock, currentBlock),
-        dtContract.queryFilter(filterLevelIncome, startBlock, currentBlock),
-        dtContract.queryFilter(filterLevelROI, startBlock, currentBlock),
-        dtContract.queryFilter(filterBonus, startBlock, currentBlock),
-        dtContract.queryFilter(filterRegIncome, startBlock, currentBlock)
-      ]);
+      // Query events sequentially to bypass JSON-RPC batch rate-limiting on public nodes
+      const depEvts = await dtContract.queryFilter(filterDeposited, startBlock, currentBlock);
+      const withEvts = await dtContract.queryFilter(filterWithdrawn, startBlock, currentBlock);
+      const incEvts = await dtContract.queryFilter(filterLevelIncome, startBlock, currentBlock);
+      const roiEvts = await dtContract.queryFilter(filterLevelROI, startBlock, currentBlock);
+      const bonEvts = await dtContract.queryFilter(filterBonus, startBlock, currentBlock);
+      const regIncEvts = await dtContract.queryFilter(filterRegIncome, startBlock, currentBlock);
 
       const list = [];
 
@@ -543,7 +587,84 @@ export default function Dashboard() {
       list.sort((a, b) => b.blockNumber - a.blockNumber);
       setTxs(list.slice(0, 10)); // Take top 10 events
     } catch (e) {
-      console.warn("Could not query contract event logs", e);
+      console.warn("Could not query contract event logs, generating fallback list from user state", e);
+      
+      // Fallback: Reconstruct transaction logs from on-chain stats if getLogs rate-limits or fails
+      const list = [];
+      const userDeposits = basicInfo ? parseFloat(formatUSDT(basicInfo.totalDeposits)) : (parseFloat(userData.totalDeposits) || 0);
+      const userWithdrawn = basicInfo ? parseFloat(formatUSDT(basicInfo.totalWithdrawn)) : (parseFloat(userData.totalWithdrawn) || 0);
+      const levelInc = incomeInfo ? parseFloat(formatUSDT(incomeInfo.levelIncomeEarned)) : (parseFloat(userData.levelIncomeEarned) || 0);
+      const levelRoi = incomeInfo ? parseFloat(formatUSDT(incomeInfo.levelROIEarned)) : (parseFloat(userData.levelROIEarned) || 0);
+      const rankBonus = incomeInfo ? parseFloat(formatUSDT(incomeInfo.performanceBonusEarned)) : (parseFloat(userData.performanceBonusEarned) || 0);
+      const regIncome = incomeInfo ? parseFloat(formatUSDT(incomeInfo.registrationIncomeEarned)) : (parseFloat(userData.registrationIncomeEarned) || 0);
+
+      if (userDeposits > 0) {
+        list.push({
+          type: "deposit",
+          tagClass: "tag roi",
+          typeName: "New Deposit",
+          detail: "Wallet funding",
+          amount: `+${userDeposits.toFixed(2)}`,
+          blockNumber: 0
+        });
+      }
+
+      if (userWithdrawn > 0) {
+        list.push({
+          type: "withdraw",
+          tagClass: "tag bonus",
+          typeName: "Withdrawal",
+          detail: "USDT payout",
+          amount: `-${userWithdrawn.toFixed(2)}`,
+          blockNumber: 0
+        });
+      }
+
+      if (levelInc > 0) {
+        list.push({
+          type: "level_income",
+          tagClass: "tag level",
+          typeName: "Level Income",
+          detail: "Referral commissions paid",
+          amount: `+${levelInc.toFixed(2)}`,
+          blockNumber: 0
+        });
+      }
+
+      if (levelRoi > 0) {
+        list.push({
+          type: "level_roi",
+          tagClass: "tag level",
+          typeName: "Level ROI",
+          detail: "Team matching ROI commissions",
+          amount: `+${levelRoi.toFixed(2)}`,
+          blockNumber: 0
+        });
+      }
+
+      if (rankBonus > 0) {
+        list.push({
+          type: "bonus",
+          tagClass: "tag bonus",
+          typeName: "Rank Bonus",
+          detail: "Performance targets achieved",
+          amount: `+${rankBonus.toFixed(2)}`,
+          blockNumber: 0
+        });
+      }
+
+      if (regIncome > 0) {
+        list.push({
+          type: "registration_income",
+          tagClass: "tag level",
+          typeName: "Reg Income",
+          detail: "Downline registration bonus",
+          amount: `+${regIncome.toFixed(2)}`,
+          blockNumber: 0
+        });
+      }
+
+      setTxs(list);
     }
   }
 
@@ -740,12 +861,161 @@ export default function Dashboard() {
     }
   }, [dtInfinityAddress, usdtAddress, targetChainId]);
 
-  // Combined available balance (On-chain claimable + real-time pending ROI)
+  // --- REAL-TIME TICKING SIMULATION CALCULATIONS ---
+  const totalDepositsNum = parseFloat(userData.totalDeposits) || 0;
+  const boosterRatePercent = parseFloat(userData.boosterRate) || 0.5; // E.g., 5.0 for 5.0%
+  const oneDaySec = Number(oneDay) || 86400;
+
+  // Accrual rates per second
+  const dailyRoiRatePerSecond = (totalDepositsNum * 0.005) / oneDaySec;
+  const boosterRateDiff = Math.max(0, (boosterRatePercent / 100) - 0.005);
+  const boosterRoiRatePerSecond = (totalDepositsNum * boosterRateDiff) / oneDaySec;
+
+  // Performance Bonus daily rate
+  let activePerfDailySum = 0;
+  if (isRegistered) {
+    const strongVol = parseFloat(userData.strongestLegVolume);
+    const totalVol = parseFloat(userData.totalTeamVolume);
+    const otherVol = totalVol - strongVol;
+    PERFORMANCE_TIERS.forEach(tier => {
+      if (strongVol >= tier.target && otherVol >= tier.target) {
+        activePerfDailySum += tier.daily;
+      }
+    });
+  }
+  const perfRoiRatePerSecond = activePerfDailySum / oneDaySec;
+
+  // Dynamic Level ROI accumulated calculation based on loaded downline nodes' actual elapsed time
+  const calculateAccumulatedLevelRoi = () => {
+    if (!isRegistered || !treeRoot || !treeNodes[treeRoot.toLowerCase()]) return 0;
+    
+    let totalAccrued = 0;
+    const rootNode = treeNodes[treeRoot.toLowerCase()];
+    const qualifiedDirects = rootNode.qualifiedDirectsCount;
+    const currentTime = Math.floor(Date.now() / 1000);
+    
+    const percentages = [
+      1500, 1000, 500, 500, 500,
+      400, 400, 400, 400, 400,
+      300, 300, 300, 300, 300,
+      200, 200, 200, 200, 200
+    ];
+
+    Object.keys(treeNodes).forEach(addr => {
+      if (addr === treeRoot.toLowerCase()) return;
+      const node = treeNodes[addr];
+      
+      let depth = 1;
+      let curr = node;
+      let pathValid = false;
+      
+      for (let i = 0; i < 30; i++) {
+        if (!curr.sponsor || curr.sponsor === ethers.ZeroAddress) break;
+        if (curr.sponsor.toLowerCase() === treeRoot.toLowerCase()) {
+          pathValid = true;
+          break;
+        }
+        const parentNode = treeNodes[curr.sponsor.toLowerCase()];
+        if (!parentNode) break;
+        curr = parentNode;
+        depth++;
+      }
+      
+      if (pathValid && depth <= 20 && qualifiedDirects >= depth) {
+        const pct = percentages[depth - 1];
+        const deposits = parseFloat(node.totalDeposits) || 0;
+        const boosterRate = node.boosterRate || 0.5;
+        
+        // Calculate downline elapsed seconds since their last update
+        const lastUpdate = Number(node.lastUpdateROI) || currentTime;
+        const elapsed = Math.max(0, currentTime - lastUpdate);
+        
+        // Downline's pending ROI
+        let pending = (deposits * (boosterRate / 100) * elapsed) / oneDaySec;
+        
+        // Enforce downline's 220% ROI cap
+        const maxRoiLimit = deposits * 2.2;
+        const earned = parseFloat(node.dailyROIEarned || 0) + parseFloat(node.roiBoosterEarned || 0);
+        if (earned + pending > maxRoiLimit) {
+          pending = Math.max(0, maxRoiLimit - earned);
+        }
+        
+        // User's commission from that ROI
+        const commission = (pending * pct) / 10000;
+        totalAccrued += commission;
+      }
+    });
+    
+    return totalAccrued;
+  };
+
+  // Accrued offsets since last blockchain update
+  const simulatedDailyOffset = dailyRoiRatePerSecond * secondsSinceSync;
+  const simulatedBoosterOffset = boosterRoiRatePerSecond * secondsSinceSync;
+  const simulatedPerfOffset = perfRoiRatePerSecond * secondsSinceSync;
+  const simulatedLevelRoiOffset = calculateAccumulatedLevelRoi();
+
+  // Initial values
+  const initialROIEarned = parseFloat(userData.dailyROIEarned) + parseFloat(userData.roiBoosterEarned);
+  const initialPendingROI = parseFloat(pendingBalances.pendingDaily) + parseFloat(pendingBalances.pendingBooster);
+  
+  // Enforce 220% ROI Cap
+  const maxRoiCap = totalDepositsNum * 2.2;
+  let totalPendingROI = initialPendingROI + simulatedDailyOffset + simulatedBoosterOffset;
+  if (initialROIEarned + totalPendingROI > maxRoiCap) {
+    totalPendingROI = Math.max(0, maxRoiCap - initialROIEarned);
+  }
+
+  // Split capped pending ROI back into daily & booster
+  let displayPendingDaily = 0;
+  let displayPendingBooster = 0;
+  const totalBoosterRate = boosterRatePercent / 100;
+  if (totalBoosterRate > 0) {
+    displayPendingDaily = (totalPendingROI * 0.005) / totalBoosterRate;
+    displayPendingBooster = totalPendingROI - displayPendingDaily;
+  }
+
+  // Enforce 400% Capping Limit (across all 6 streams)
+  const maxNetworkCap = totalDepositsNum * 4.0;
+  const initialTotalEarned = 
+    parseFloat(userData.levelIncomeEarned) +
+    parseFloat(userData.levelROIEarned) +
+    parseFloat(userData.performanceBonusEarned) +
+    parseFloat(userData.registrationIncomeEarned) +
+    parseFloat(userData.dailyROIEarned) +
+    parseFloat(userData.roiBoosterEarned);
+
+  let displayPendingLevelROI = simulatedLevelRoiOffset;
+  let displayPendingPerf = parseFloat(pendingBalances.pendingPerf) + simulatedPerfOffset;
+  const totalSimulatedPending = displayPendingDaily + displayPendingBooster + displayPendingPerf + displayPendingLevelROI;
+
+  if (initialTotalEarned + totalSimulatedPending > maxNetworkCap) {
+    const remainingCap = Math.max(0, maxNetworkCap - initialTotalEarned);
+    if (totalPendingROI > remainingCap) {
+      displayPendingDaily = (remainingCap * 0.005) / totalBoosterRate;
+      displayPendingBooster = remainingCap - displayPendingDaily;
+      displayPendingLevelROI = 0;
+      displayPendingPerf = 0;
+    } else if (totalPendingROI + displayPendingLevelROI > remainingCap) {
+      displayPendingLevelROI = remainingCap - totalPendingROI;
+      displayPendingPerf = 0;
+    } else {
+      displayPendingPerf = remainingCap - totalPendingROI - displayPendingLevelROI;
+    }
+  }
+
+  // Display-ready values
+  const displayDailyROI = (parseFloat(userData.dailyROIEarned) + displayPendingDaily).toFixed(2);
+  const displayBoosterROI = (parseFloat(userData.roiBoosterEarned) + displayPendingBooster).toFixed(2);
+  const displayPerformanceBonus = (parseFloat(userData.performanceBonusEarned) + displayPendingPerf).toFixed(2);
+  const displayLevelROI = (parseFloat(userData.levelROIEarned) + displayPendingLevelROI).toFixed(2);
+
   const totalAvailableBalance = (
     parseFloat(userData.claimableBalance) + 
-    parseFloat(pendingBalances.pendingDaily) + 
-    parseFloat(pendingBalances.pendingBooster) + 
-    parseFloat(pendingBalances.pendingPerf)
+    displayPendingDaily + 
+    displayPendingBooster + 
+    displayPendingLevelROI +
+    displayPendingPerf
   ).toFixed(2);
 
   const totalEarnedAcrossStreams = (
@@ -755,29 +1025,26 @@ export default function Dashboard() {
     parseFloat(userData.levelROIEarned) +
     parseFloat(userData.performanceBonusEarned) +
     parseFloat(userData.registrationIncomeEarned) +
-    parseFloat(pendingBalances.pendingDaily) +
-    parseFloat(pendingBalances.pendingBooster) +
-    parseFloat(pendingBalances.pendingPerf)
+    displayPendingDaily +
+    displayPendingBooster +
+    displayPendingLevelROI +
+    displayPendingPerf
   ).toFixed(2);
 
-  // Capping Calculations (220% ROI / 400% Network)
-  const totalDepositsNum = parseFloat(userData.totalDeposits) || 0;
-  
-  const maxRoiCap = totalDepositsNum * 2.2;
-  const currentRoiEarned = 
-    parseFloat(userData.dailyROIEarned) +
-    parseFloat(userData.roiBoosterEarned) +
-    parseFloat(pendingBalances.pendingDaily) +
-    parseFloat(pendingBalances.pendingBooster);
+  const currentRoiEarned = initialROIEarned + displayPendingDaily + displayPendingBooster;
   const roiCapPercent = maxRoiCap > 0 ? Math.min((currentRoiEarned / maxRoiCap) * 100, 100) : 0;
 
-  const maxNetworkCap = totalDepositsNum * 4.0;
   const currentNetworkEarned = 
     parseFloat(userData.levelIncomeEarned) +
     parseFloat(userData.levelROIEarned) +
     parseFloat(userData.performanceBonusEarned) +
     parseFloat(userData.registrationIncomeEarned) +
-    parseFloat(pendingBalances.pendingPerf);
+    parseFloat(userData.dailyROIEarned) +
+    parseFloat(userData.roiBoosterEarned) +
+    displayPendingDaily +
+    displayPendingBooster +
+    displayPendingLevelROI +
+    displayPendingPerf;
   const networkCapPercent = maxNetworkCap > 0 ? Math.min((currentNetworkEarned / maxNetworkCap) * 100, 100) : 0;
 
   // Recursive Component for Tree Rendering
@@ -981,17 +1248,51 @@ export default function Dashboard() {
 
   return (
     <div className="shell">
+      {/* SIDEBAR OVERLAY FOR MOBILE */}
+      {sidebarOpen && (
+        <div 
+          className="sidebar-overlay" 
+          onClick={() => setSidebarOpen(false)}
+          style={{
+            position: "fixed",
+            top: 0, left: 0, right: 0, bottom: 0,
+            background: "rgba(5, 7, 10, 0.7)",
+            backdropFilter: "blur(4px)",
+            zIndex: 15
+          }}
+        />
+      )}
+      
       {/* SIDEBAR */}
-      <aside className="sidebar">
-        <div className="brand" style={{ padding: "0" }}>
-          <img src="/logo.png" alt="DT Infinity Logo" style={{ height: "36px", objectFit: "contain" }} />
+      <aside className={`sidebar ${sidebarOpen ? "open" : ""}`} style={{ zIndex: 20 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div className="brand" style={{ padding: "0" }}>
+            <img src="/logo.png" alt="DT Infinity Logo" style={{ height: "36px", objectFit: "contain" }} />
+          </div>
+          <button 
+            className="mobile-close-btn"
+            onClick={() => setSidebarOpen(false)}
+            style={{
+              display: "none",
+              background: "none",
+              border: "none",
+              color: "var(--text-muted)",
+              cursor: "pointer",
+              padding: "4px"
+            }}
+          >
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2">
+              <line x1="18" y1="6" x2="6" y2="18"/>
+              <line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+          </button>
         </div>
 
         <nav className="nav">
           <div className="nav-label">Overview</div>
           <button 
             className={`nav-item ${activeView === "dashboard" ? "active" : ""}`} 
-            onClick={() => setActiveView("dashboard")}
+            onClick={() => { setActiveView("dashboard"); setSidebarOpen(false); }}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
               <rect x="3" y="3" width="7" height="9" rx="1.5"/>
@@ -1003,7 +1304,7 @@ export default function Dashboard() {
           </button>
           <button 
             className={`nav-item ${activeView === "network" ? "active" : ""}`} 
-            onClick={() => setActiveView("network")}
+            onClick={() => { setActiveView("network"); setSidebarOpen(false); }}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
               <circle cx="12" cy="5" r="2.2"/>
@@ -1015,7 +1316,7 @@ export default function Dashboard() {
           </button>
           <button 
             className={`nav-item ${activeView === "history" ? "active" : ""}`} 
-            onClick={() => setActiveView("history")}
+            onClick={() => { setActiveView("history"); setSidebarOpen(false); }}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
               <circle cx="12" cy="12" r="8.5"/>
@@ -1027,7 +1328,7 @@ export default function Dashboard() {
           <div className="nav-label">Funds</div>
           <button 
             className={`nav-item ${activeView === "deposit" ? "active" : ""}`} 
-            onClick={() => setActiveView("deposit")}
+            onClick={() => { setActiveView("deposit"); setSidebarOpen(false); }}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
               <path d="M12 4v16M4 12h16"/>
@@ -1036,7 +1337,7 @@ export default function Dashboard() {
           </button>
           <button 
             className={`nav-item ${activeView === "withdraw" ? "active" : ""}`} 
-            onClick={() => setActiveView("withdraw")}
+            onClick={() => { setActiveView("withdraw"); setSidebarOpen(false); }}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
               <rect x="2.5" y="6" width="19" height="13" rx="2"/>
@@ -1048,7 +1349,7 @@ export default function Dashboard() {
           <div className="nav-label">Account</div>
           <button 
             className={`nav-item ${activeView === "profile" ? "active" : ""}`} 
-            onClick={() => setActiveView("profile")}
+            onClick={() => { setActiveView("profile"); setSidebarOpen(false); }}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
               <circle cx="12" cy="8" r="3.3"/>
@@ -1069,17 +1370,40 @@ export default function Dashboard() {
       {/* MAIN CONTAINER */}
       <main className="main">
         <div className="topbar">
-          <div>
-            <h1 className="display" style={{ textTransform: "capitalize" }}>
-              {activeView === "dashboard" ? "Dashboard" : activeView.replace("-", " ")}
-            </h1>
-            <div className="greet">
-              {activeView === "dashboard" && "Welcome back — here's your income overview."}
-              {activeView === "network" && "Track referrals and business volume across your network."}
-              {activeView === "history" && "Audit all incoming daily commissions and bonus logs."}
-              {activeView === "deposit" && "Activate package or increase investment instantly."}
-              {activeView === "withdraw" && "Withdraw claimable rewards to your connected wallet."}
-              {activeView === "profile" && "Contract configurations and developer test tools."}
+          <div className="topbar-left">
+            <button 
+              className="mobile-menu-btn" 
+              onClick={() => setSidebarOpen(true)}
+              style={{
+                display: "none",
+                background: "none",
+                border: "none",
+                color: "var(--text)",
+                cursor: "pointer",
+                padding: "6px"
+              }}
+            >
+              <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                <line x1="4" y1="12" x2="20" y2="12"/>
+                <line x1="4" y1="6" x2="20" y2="6"/>
+                <line x1="4" y1="18" x2="20" y2="18"/>
+              </svg>
+            </button>
+            <div className="brand" style={{ display: "none" }}>
+              <img src="/logo.png" alt="DT Infinity Logo" style={{ height: "30px", objectFit: "contain" }} />
+            </div>
+            <div className="title-section">
+              <h1 className="display" style={{ textTransform: "capitalize" }}>
+                {activeView === "dashboard" ? "Dashboard" : activeView.replace("-", " ")}
+              </h1>
+              <div className="greet">
+                {activeView === "dashboard" && "Welcome back — here's your income overview."}
+                {activeView === "network" && "Track referrals and business volume across your network."}
+                {activeView === "history" && "Audit all incoming daily commissions and bonus logs."}
+                {activeView === "deposit" && "Activate package or increase investment instantly."}
+                {activeView === "withdraw" && "Withdraw claimable rewards to your connected wallet."}
+                {activeView === "profile" && "Contract configurations and developer test tools."}
+              </div>
             </div>
           </div>
 
@@ -1159,15 +1483,7 @@ export default function Dashboard() {
             </div>
           </div>
 
-          <div className="stat-row" style={{ gridTemplateColumns: "1fr 1fr" }}>
-            <div className="card mini-card">
-              <div className="k">Total Contract Available Balance</div>
-              <div className="big mono" style={{ color: "var(--blue-bright)" }}>
-                {contractUSDTBalance} <span style={{ fontSize: "14px", color: "var(--text-muted)" }}>USDT</span>
-              </div>
-              <div className="sub">Total liquidity locked inside main contract</div>
-            </div>
-            
+          <div className="stat-row" style={{ gridTemplateColumns: "1fr" }}>
             <div className="card mini-card">
               <div className="k">Total Withdraw Balance</div>
               <div className="big mono" style={{ color: "var(--up)" }}>
@@ -1178,7 +1494,7 @@ export default function Dashboard() {
           </div>
 
           <div className="section-title">Income Capping Limits</div>
-          <div className="two-col" style={{ gridTemplateColumns: "1fr 1fr", gap: "20px", marginBottom: "25px" }}>
+          <div className="capping-grid">
             <div className="card" style={{ padding: "20px" }}>
               <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "10px" }}>
                 <span style={{ fontWeight: "600", fontSize: "14px" }}>ROI Limit Cap (220% Max)</span>
@@ -1206,7 +1522,7 @@ export default function Dashboard() {
                 <div className="progress-fill network-fill" style={{ width: `${networkCapPercent}%`, height: "100%", transition: "width 0.3s ease" }}></div>
               </div>
               <div style={{ display: "flex", justifyContent: "space-between", marginTop: "8px", fontSize: "11px", color: "var(--text-muted)" }}>
-                <span>Includes Level, Matching, Perf, & Reg Income</span>
+                <span>Includes all ROI, Booster & Network Income</span>
                 <span>{networkCapPercent.toFixed(1)}% Reached</span>
               </div>
             </div>
@@ -1222,7 +1538,7 @@ export default function Dashboard() {
               </div>
               <div className="name">Daily ROI</div>
               <div className="amt mono">
-                {(parseFloat(userData.dailyROIEarned) + parseFloat(pendingBalances.pendingDaily)).toFixed(2)}
+                {displayDailyROI}
               </div>
               <div className="rate">0.5% / day base</div>
             </div>
@@ -1235,7 +1551,7 @@ export default function Dashboard() {
               </div>
               <div className="name">ROI Booster</div>
               <div className="amt mono">
-                {(parseFloat(userData.roiBoosterEarned) + parseFloat(pendingBalances.pendingBooster)).toFixed(2)}
+                {displayBoosterROI}
               </div>
               <div className="rate">Booster Rate: {userData.boosterRate}</div>
             </div>
@@ -1261,7 +1577,7 @@ export default function Dashboard() {
                 </svg>
               </div>
               <div className="name">Level ROI</div>
-              <div className="amt mono">{userData.levelROIEarned}</div>
+              <div className="amt mono">{displayLevelROI}</div>
               <div className="rate">Team matching ROI</div>
             </div>
 
@@ -1273,7 +1589,7 @@ export default function Dashboard() {
               </div>
               <div className="name">Performance Bonus</div>
               <div className="amt mono">
-                {(parseFloat(userData.performanceBonusEarned) + parseFloat(pendingBalances.pendingPerf)).toFixed(2)}
+                {displayPerformanceBonus}
               </div>
               <div className="rate">Leg volume match</div>
             </div>
@@ -1395,7 +1711,7 @@ export default function Dashboard() {
             </div>
           </div>
 
-          <div className="two-col" style={{ gridTemplateColumns: "2fr 1fr", gap: "20px" }}>
+          <div className="network-grid">
             <div className="card" style={{ overflow: "hidden" }}>
               <div className="section-title" style={{ marginTop: 0 }}>Interactive Network Tree</div>
               <p style={{ color: "var(--text-muted)", fontSize: "12px", marginBottom: "20px" }}>
@@ -1726,72 +2042,7 @@ export default function Dashboard() {
             </table>
           </div>
 
-          <div className="card">
-            <div className="section-title" style={{ marginTop: 0 }}>Smart Contract Configurations (BNB Chain settings)</div>
-            <p style={{ color: "var(--text-muted)", fontSize: "13px", lineHeight: "1.6", marginBottom: "15px" }}>
-              Paste your deployed Remix contract addresses below to sync your testing environment:
-            </p>
-            <div className="withdraw-card" style={{ gap: "15px" }}>
-              <div>
-                <div className="field">
-                  <label>DT Infinity Contract Address</label>
-                  <input 
-                    type="text" 
-                    value={dtInfinityAddress}
-                    onChange={(e) => setDtInfinityAddress(e.target.value)}
-                  />
-                </div>
-                <div className="field">
-                  <label>USDT Token Contract Address</label>
-                  <input 
-                    type="text" 
-                    value={usdtAddress}
-                    onChange={(e) => setUsdtAddress(e.target.value)}
-                  />
-                </div>
-                <div className="field">
-                  <label>Target Blockchain Network</label>
-                  <select 
-                    value={targetChainId.toString()} 
-                    onChange={(e) => setTargetChainId(BigInt(e.target.value))}
-                    style={{
-                      width: "100%", background: "var(--surface-2)", border: "1px solid var(--border)", borderRadius: "10px",
-                      padding: "12px 14px", color: "var(--text)", fontSize: "13.5px", fontFamily: "inherit"
-                    }}
-                  >
-                    <option value="97">BSC Testnet (Chain ID 97)</option>
-                    <option value="56">BSC Mainnet (Chain ID 56)</option>
-                  </select>
-                </div>
-                <button className="withdraw-btn" onClick={handleSaveConfig}>
-                  Save & Reload Configurations
-                </button>
-              </div>
-              <div className="avail-box">
-                <div className="k">Current Configuration</div>
-                <div style={{ marginTop: "10px", fontSize: "12px", display: "flex", flexDirection: "column", gap: "8px" }}>
-                  <div><strong>DT Infinity:</strong> <span className="mono" style={{ color: "var(--blue-bright)" }}>{dtInfinityAddress}</span></div>
-                  <div><strong>USDT Token:</strong> <span className="mono" style={{ color: "var(--blue-bright)" }}>{usdtAddress}</span></div>
-                  <div><strong>Target Network:</strong> <span className="mono" style={{ color: "var(--blue-bright)" }}>{targetChainId === 97n ? "BSC Testnet" : "BSC Mainnet"}</span></div>
-                </div>
-                <button 
-                  onClick={() => {
-                    setDtInfinityAddress(DEFAULT_DT_INFINITY_ADDRESS);
-                    setUsdtAddress(DEFAULT_USDT_ADDRESS);
-                    setTargetChainId(97n);
-                    localStorage.removeItem("DT_INFINITY_ADDRESS");
-                    localStorage.removeItem("USDT_ADDRESS");
-                    localStorage.removeItem("TARGET_CHAIN_ID");
-                    alert("Reset to default test configurations.");
-                  }} 
-                  className="copy-btn" 
-                  style={{ marginTop: "20px", padding: "8px" }}
-                >
-                  Reset to Defaults
-                </button>
-              </div>
-            </div>
-          </div>
+
         </div>
       </main>
     </div>
