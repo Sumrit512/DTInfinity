@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import { ethers } from "ethers";
 
 // Default contract addresses (placeholders that user can update in settings)
-const DEFAULT_DT_INFINITY_ADDRESS = "0x13e0d418131f7159fafd263fdb416bd052f88345";
+const DEFAULT_DT_INFINITY_ADDRESS = "0xfd1fc2655fa9ce081e5af1618715c8a758e8013c";
 const DEFAULT_USDT_ADDRESS = "0x0aB8c2DfE9aD2e2D3f58E6006884cda5e6f1E7B9";
 
 // Simple USDT ABI
@@ -30,7 +30,7 @@ const DT_INFINITY_ABI = [
   "function withdraw(uint256 amount) external",
   "function claimAll() external",
   "function getUserBasicInfo(address user) external view returns (address sponsor, uint256 totalDeposits, uint256 registrationTime, uint256 lastUpdateROI, uint256 claimableBalance, uint256 totalWithdrawn)",
-  "function getUserIncomeInfo(address user) external view returns (uint256 dailyROIEarned, uint256 roiBoosterEarned, uint256 levelIncomeEarned, uint256 levelROIEarned, uint256 performanceBonusEarned, uint256 registrationIncomeEarned)",
+  "function getUserIncomeInfo(address user) external view returns (uint256 dailyROIEarned, uint256 roiBoosterEarned, uint256 levelIncomeEarned, uint256 levelROIEarned, uint256 performanceBonusEarned)",
   "function getUserNetworkInfo(address user) external view returns (uint256 directCount, uint256 qualifiedDirectsCount, uint256 totalTeamCount, uint256 totalTeamVolume, address strongestLegAddress, uint256 strongestLegVolume)",
   "function getPendingBalances(address userAddr) external view returns (uint256 pendingDaily, uint256 pendingBooster, uint256 pendingPerf)",
   "function userLegVolume(address sponsor, address directReferral) external view returns (uint256)",
@@ -39,8 +39,7 @@ const DT_INFINITY_ABI = [
   "event Withdrawn(address indexed user, uint256 amount, uint256 time)",
   "event LevelIncomePaid(address indexed upline, address indexed downline, uint256 level, uint256 amount)",
   "event LevelROIPaid(address indexed upline, address indexed downline, uint256 level, uint256 amount)",
-  "event PerformanceBonusAchieved(address indexed user, uint256 tierIndex, uint256 instantReward)",
-  "event RegistrationIncomePaid(address indexed upline, address indexed downline, uint256 level, uint256 amount)"
+  "event PerformanceBonusAchieved(address indexed user, uint256 tierIndex, uint256 instantReward)"
 ];
 
 const PERFORMANCE_TIERS = [
@@ -91,7 +90,6 @@ export default function Dashboard() {
     levelIncomeEarned: "0.00",
     levelROIEarned: "0.00",
     performanceBonusEarned: "0.00",
-    registrationIncomeEarned: "0.00",
     claimableBalance: "0.00",
     totalWithdrawn: "0.00",
     directCount: 0,
@@ -400,7 +398,6 @@ export default function Dashboard() {
           levelIncomeEarned: formatUSDT(incomeInfo.levelIncomeEarned),
           levelROIEarned: formatUSDT(incomeInfo.levelROIEarned),
           performanceBonusEarned: formatUSDT(incomeInfo.performanceBonusEarned),
-          registrationIncomeEarned: formatUSDT(incomeInfo.registrationIncomeEarned),
           claimableBalance: formatUSDT(basicInfo.claimableBalance),
           totalWithdrawn: formatUSDT(basicInfo.totalWithdrawn),
           directCount: Number(networkInfo.directCount),
@@ -468,7 +465,6 @@ export default function Dashboard() {
           levelIncomeEarned: "0.00",
           levelROIEarned: "0.00",
           performanceBonusEarned: "0.00",
-          registrationIncomeEarned: "0.00",
           claimableBalance: "0.00",
           totalWithdrawn: "0.00",
           directCount: 0,
@@ -505,7 +501,6 @@ export default function Dashboard() {
       const filterLevelIncome = dtContract.filters.LevelIncomePaid(addr);
       const filterLevelROI = dtContract.filters.LevelROIPaid(addr);
       const filterBonus = dtContract.filters.PerformanceBonusAchieved(addr);
-      const filterRegIncome = dtContract.filters.RegistrationIncomePaid(addr);
 
       // Query events sequentially to bypass JSON-RPC batch rate-limiting on public nodes
       const depEvts = await dtContract.queryFilter(filterDeposited, startBlock, currentBlock);
@@ -513,7 +508,6 @@ export default function Dashboard() {
       const incEvts = await dtContract.queryFilter(filterLevelIncome, startBlock, currentBlock);
       const roiEvts = await dtContract.queryFilter(filterLevelROI, startBlock, currentBlock);
       const bonEvts = await dtContract.queryFilter(filterBonus, startBlock, currentBlock);
-      const regIncEvts = await dtContract.queryFilter(filterRegIncome, startBlock, currentBlock);
 
       const list = [];
 
@@ -572,16 +566,7 @@ export default function Dashboard() {
         });
       });
 
-      regIncEvts.forEach(e => {
-        list.push({
-          type: "registration_income",
-          tagClass: "tag level",
-          typeName: "Reg Income",
-          detail: `Level ${e.args.level.toString()} · ${shorten(e.args.downline)}`,
-          amount: `+${formatUSDT(e.args.amount)}`,
-          blockNumber: e.blockNumber
-        });
-      });
+
 
       // Sort by block number descending
       list.sort((a, b) => b.blockNumber - a.blockNumber);
@@ -596,7 +581,6 @@ export default function Dashboard() {
       const levelInc = incomeInfo ? parseFloat(formatUSDT(incomeInfo.levelIncomeEarned)) : (parseFloat(userData.levelIncomeEarned) || 0);
       const levelRoi = incomeInfo ? parseFloat(formatUSDT(incomeInfo.levelROIEarned)) : (parseFloat(userData.levelROIEarned) || 0);
       const rankBonus = incomeInfo ? parseFloat(formatUSDT(incomeInfo.performanceBonusEarned)) : (parseFloat(userData.performanceBonusEarned) || 0);
-      const regIncome = incomeInfo ? parseFloat(formatUSDT(incomeInfo.registrationIncomeEarned)) : (parseFloat(userData.registrationIncomeEarned) || 0);
 
       if (userDeposits > 0) {
         list.push({
@@ -653,16 +637,7 @@ export default function Dashboard() {
         });
       }
 
-      if (regIncome > 0) {
-        list.push({
-          type: "registration_income",
-          tagClass: "tag level",
-          typeName: "Reg Income",
-          detail: "Downline registration bonus",
-          amount: `+${regIncome.toFixed(2)}`,
-          blockNumber: 0
-        });
-      }
+
 
       setTxs(list);
     }
@@ -981,7 +956,6 @@ export default function Dashboard() {
     parseFloat(userData.levelIncomeEarned) +
     parseFloat(userData.levelROIEarned) +
     parseFloat(userData.performanceBonusEarned) +
-    parseFloat(userData.registrationIncomeEarned) +
     parseFloat(userData.dailyROIEarned) +
     parseFloat(userData.roiBoosterEarned);
 
@@ -1024,7 +998,6 @@ export default function Dashboard() {
     parseFloat(userData.levelIncomeEarned) +
     parseFloat(userData.levelROIEarned) +
     parseFloat(userData.performanceBonusEarned) +
-    parseFloat(userData.registrationIncomeEarned) +
     displayPendingDaily +
     displayPendingBooster +
     displayPendingLevelROI +
@@ -1038,7 +1011,6 @@ export default function Dashboard() {
     parseFloat(userData.levelIncomeEarned) +
     parseFloat(userData.levelROIEarned) +
     parseFloat(userData.performanceBonusEarned) +
-    parseFloat(userData.registrationIncomeEarned) +
     parseFloat(userData.dailyROIEarned) +
     parseFloat(userData.roiBoosterEarned) +
     displayPendingDaily +
@@ -1567,7 +1539,7 @@ export default function Dashboard() {
               </div>
               <div className="name">Level Income</div>
               <div className="amt mono">{userData.levelIncomeEarned}</div>
-              <div className="rate">10 levels deep</div>
+              <div className="rate">5 levels deep</div>
             </div>
 
             <div className="income-card">
@@ -1592,20 +1564,6 @@ export default function Dashboard() {
                 {displayPerformanceBonus}
               </div>
               <div className="rate">Leg volume match</div>
-            </div>
-
-            <div className="income-card">
-              <div className="icon">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                  <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
-                  <circle cx="9" cy="7" r="4"/>
-                  <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
-                  <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
-                </svg>
-              </div>
-              <div className="name">Registration Income</div>
-              <div className="amt mono">{userData.registrationIncomeEarned}</div>
-              <div className="rate">5 levels deep</div>
             </div>
           </div>
 
