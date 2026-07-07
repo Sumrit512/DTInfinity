@@ -345,8 +345,10 @@ export default function Dashboard() {
         ...prev,
         [addr.toLowerCase()]: nodeData
       }));
+      return nodeData;
     } catch (e) {
       console.error("Failed to load tree node", addr, e);
+      return null;
     }
   }
 
@@ -462,11 +464,32 @@ export default function Dashboard() {
 
         setDirectsList(directs);
 
-        // Auto-load direct referrals (Level 1 downlines) details for Level ROI simulation
+        let loadedDirectsMap = {};
+        // Auto-load all downline referrals recursively up to 5 levels for complete Level Income simulation
         if (directs && directs.length > 0) {
-          Promise.all(directs.map(childAddr => loadTreeNode(childAddr, dtContract))).catch(e => {
-            console.warn("Failed to auto-load some direct referrals", e);
-          });
+          try {
+            let totalLoadedNodes = 0;
+            const loadTreeRecursively = async (addresses, currentLevel) => {
+              if (currentLevel >= 5 || !addresses || addresses.length === 0 || totalLoadedNodes >= 100) return;
+              const chunk = addresses.slice(0, 100 - totalLoadedNodes);
+              totalLoadedNodes += chunk.length;
+              
+              const results = await Promise.all(chunk.map(childAddr => loadTreeNode(childAddr, dtContract)));
+              const nextLevelAddresses = [];
+              results.forEach(res => {
+                if (res) {
+                  loadedDirectsMap[res.address.toLowerCase()] = res;
+                  if (res.children && res.children.length > 0) {
+                    nextLevelAddresses.push(...res.children);
+                  }
+                }
+              });
+              await loadTreeRecursively(nextLevelAddresses, currentLevel + 1);
+            };
+            await loadTreeRecursively(directs, 1);
+          } catch (e) {
+            console.warn("Failed to recursively auto-load downline referrals", e);
+          }
         }
 
         // Load pending performance qualifications
@@ -502,7 +525,7 @@ export default function Dashboard() {
         }
 
         // Load transaction logs from contract events
-        fetchEventLogs(dtContract, addr, basicInfo, incomeInfo, directs, currentOneDayVal);
+        fetchEventLogs(dtContract, addr, basicInfo, incomeInfo, directs, currentOneDayVal, loadedDirectsMap);
       } else {
         // Reset user data for unregistered
         setUserData({
@@ -541,26 +564,86 @@ export default function Dashboard() {
   }
 
   // Locally simulate transaction ledger for ROI and Matching
-  function generateSimulatedLedger(addr, basicInfo, incomeInfo, directs, currentOneDayVal) {
-    console.log("Simulating ledger for:", addr, "registrationTime:", basicInfo ? Number(basicInfo.registrationTime) : 0, "totalDeposits:", basicInfo ? basicInfo.totalDeposits.toString() : "0", "oneDay:", Number(currentOneDayVal));
-    if (!walletConnected || !basicInfo || Number(basicInfo.registrationTime) === 0 || basicInfo.totalDeposits === 0n) {
-      return [];
-    }
-
-    const sponsorJoin = Number(basicInfo.registrationTime);
-    const sponsorDeposit = parseFloat(ethers.formatUnits(basicInfo.totalDeposits, 18));
+  function generateSimulatedLedger(addr, basicInfo, incomeInfo, directs, currentOneDayVal, loadedDirectsMap = {}) {
+    const sponsorJoin = Number(basicInfo?.registrationTime || 0);
+    const sponsorDeposit = basicInfo ? parseFloat(ethers.formatUnits(basicInfo.totalDeposits, 18)) : 0;
     const ONE_DAY_SECS = Number(currentOneDayVal || 86400n);
     const now = Math.floor(Date.now() / 1000);
     const numDays = Math.floor((now - sponsorJoin) / ONE_DAY_SECS);
 
+    console.log("Simulating ledger debug:", {
+      basicInfoExists: !!basicInfo,
+      sponsorJoin,
+      sponsorDeposit,
+      ONE_DAY_SECS,
+      now,
+      diff: now - sponsorJoin,
+      numDays
+    });
+
+    if (!basicInfo || Number(basicInfo.registrationTime) === 0 || basicInfo.totalDeposits === 0n) {
+      console.log("Simulating ledger exit: conditions not met");
+      return [];
+    }
+
     const list = [];
-    if (numDays <= 0) return list;
+
+    // Traverse the downline tree up to 5 levels to simulate individual Level Incomes
+    const levelIncomePercentages = [500, 200, 100, 100, 100];
+    const queue = [{ address: addr, level: 0 }];
+    const visited = new Set([addr.toLowerCase()]);
+    
+    let head = 0;
+    while (head < queue.length) {
+      const curr = queue[head++];
+      if (curr.level >= 5) continue;
+      
+      const currNode = curr.address.toLowerCase() === addr.toLowerCase()
+        ? { children: directs || directsList }
+        : (loadedDirectsMap[curr.address.toLowerCase()] || treeNodes[curr.address.toLowerCase()]);
+        
+      if (currNode && currNode.children) {
+        currNode.children.forEach(childAddr => {
+          const childKey = childAddr.toLowerCase();
+          if (!visited.has(childKey)) {
+            visited.add(childKey);
+            const childNode = loadedDirectsMap[childKey] || treeNodes[childKey];
+            if (childNode) {
+              const depositVal = parseFloat(childNode.totalDeposits || 0);
+              if (depositVal > 0) {
+                const pct = levelIncomePercentages[curr.level]; // Level 1 is index 0
+                const amount = (depositVal * pct) / 10000;
+                if (amount > 0) {
+                  list.push({
+                    type: "level_income",
+                    typeName: "Level Income",
+                    fromUser: childAddr,
+                    amount: amount,
+                    level: curr.level + 1,
+                    timestamp: childNode.registrationTime,
+                    status: "Completed",
+                    txHash: `0x_linc_${childAddr.toLowerCase()}_${curr.level + 1}`,
+                    blockNumber: 0
+                  });
+                }
+              }
+              queue.push({ address: childAddr, level: curr.level + 1 });
+            }
+          }
+        });
+      }
+    }
+
+    if (numDays <= 0) {
+      console.log("Simulating ledger exit: numDays <= 0 after level income simulation");
+      return list;
+    }
 
     // Load directs data
     const directsData = [];
     const directsToUse = directs || directsList;
     directsToUse.forEach(childAddr => {
-      const node = treeNodes[childAddr.toLowerCase()];
+      const node = loadedDirectsMap[childAddr.toLowerCase()] || treeNodes[childAddr.toLowerCase()];
       if (node) {
         directsData.push({
           address: childAddr,
@@ -602,35 +685,19 @@ export default function Dashboard() {
       const dayTime = sponsorJoin + d * ONE_DAY_SECS;
       const rateBps = getBoosterRateAtTime(dayTime);
       
-      // Daily ROI (0.5% base)
-      const dailyAmt = (sponsorDeposit * 50) / 10000;
+      // Daily ROI (Includes booster if active)
+      const totalDailyAmt = (sponsorDeposit * rateBps) / 10000;
       list.push({
         type: "roi",
         typeName: "Daily ROI Payout",
         fromUser: "Contract",
-        amount: dailyAmt,
+        amount: totalDailyAmt,
         level: "-",
         timestamp: dayTime,
         status: "Completed",
         txHash: `0x_roi_${d}`,
         blockNumber: 0
       });
-
-      // Booster ROI (if rate > 0.5%)
-      if (rateBps > 50) {
-        const boosterAmt = (sponsorDeposit * (rateBps - 50)) / 10000;
-        list.push({
-          type: "booster_roi",
-          typeName: "Booster ROI Payout",
-          fromUser: "Contract",
-          amount: boosterAmt,
-          level: "-",
-          timestamp: dayTime,
-          status: "Completed",
-          txHash: `0x_booster_${d}`,
-          blockNumber: 0
-        });
-      }
 
       // 2. Level ROI Matching (15% of directs' daily + booster ROI payouts)
       const qualifiedDirectsOnDay = directsData.filter(dr => dr.registrationTime <= dayTime && dr.totalDeposits >= 50).length;
@@ -642,11 +709,11 @@ export default function Dashboard() {
           const childActiveSecs = dayTime - child.registrationTime;
           if (childActiveSecs >= ONE_DAY_SECS) {
             let childRateBps = 50;
-            const childNode = treeNodes[child.address.toLowerCase()];
+            const childNode = loadedDirectsMap[child.address.toLowerCase()] || treeNodes[child.address.toLowerCase()];
             if (childNode && childNode.children && childNode.children.length > 0) {
               const childDirectsData = [];
               childNode.children.forEach(gcAddr => {
-                const gcNode = treeNodes[gcAddr.toLowerCase()];
+                const gcNode = loadedDirectsMap[gcAddr.toLowerCase()] || treeNodes[gcAddr.toLowerCase()];
                 if (gcNode) {
                   childDirectsData.push({
                     registrationTime: gcNode.registrationTime,
@@ -722,7 +789,7 @@ export default function Dashboard() {
   }
 
   // Query events to build a live transaction history
-  async function fetchEventLogs(dtContract, addr, basicInfo = null, incomeInfo = null, directs = null, currentOneDayVal = 86400n) {
+  async function fetchEventLogs(dtContract, addr, basicInfo = null, incomeInfo = null, directs = null, currentOneDayVal = 86400n, loadedDirectsMap = {}) {
     // Event parser helpers
     const parseDeposited = (e) => ({
       type: "deposit",
@@ -836,6 +903,15 @@ export default function Dashboard() {
       const provider = new ethers.BrowserProvider(window.ethereum);
       const currentBlock = await provider.getBlockNumber();
       
+      // Use a custom stable RPC endpoint for reading events to avoid Metamask browser 403 blocks
+      let queryContract = dtContract;
+      try {
+        const readProvider = new ethers.JsonRpcProvider("https://bsc-testnet-rpc.publicnode.com");
+        queryContract = new ethers.Contract(dtInfinityAddress, DT_INFINITY_ABI, readProvider);
+      } catch (rpcErr) {
+        console.warn("Failed to initialize custom JsonRpcProvider for logs, using default contract instance", rpcErr);
+      }
+      
       const cacheKey = `TX_CACHE_${addr.toLowerCase()}`;
       let cachedData = { lastBlock: 0, txs: [] };
       try {
@@ -854,8 +930,8 @@ export default function Dashboard() {
       }
 
       if (startBlock <= currentBlock) {
-        // Query new logs in batches of 4000 blocks to prevent RPC rate-limits
-        const BATCH_SIZE = 4000;
+        // Query new logs in batches of 1000 blocks to prevent RPC rate-limits
+        const BATCH_SIZE = 1000;
         let tempTxs = [];
         
         for (let from = startBlock; from <= currentBlock; from += BATCH_SIZE) {
@@ -866,15 +942,18 @@ export default function Dashboard() {
           let incEvts = [];
           let perfAchievedEvts = [];
 
-          try { depEvts = await dtContract.queryFilter(dtContract.filters.Deposited(addr), from, to); } catch (e) { console.warn("Failed depEvts query", e); }
-          try { withEvts = await dtContract.queryFilter(dtContract.filters.Withdrawn(addr), from, to); } catch (e) { console.warn("Failed withEvts query", e); }
-          try { incEvts = await dtContract.queryFilter(dtContract.filters.LevelIncomePaid(addr), from, to); } catch (e) { console.warn("Failed incEvts query", e); }
-          try { perfAchievedEvts = await dtContract.queryFilter(dtContract.filters.PerformanceBonusAchieved(addr), from, to); } catch (e) { console.warn("Failed perfAchievedEvts query", e); }
+          try { depEvts = await queryContract.queryFilter(queryContract.filters.Deposited(addr), from, to); } catch (e) { console.warn("Failed depEvts query", e); }
+          try { withEvts = await queryContract.queryFilter(queryContract.filters.Withdrawn(addr), from, to); } catch (e) { console.warn("Failed withEvts query", e); }
+          try { incEvts = await queryContract.queryFilter(queryContract.filters.LevelIncomePaid(addr), from, to); } catch (e) { console.warn("Failed incEvts query", e); }
+          try { perfAchievedEvts = await queryContract.queryFilter(queryContract.filters.PerformanceBonusAchieved(addr), from, to); } catch (e) { console.warn("Failed perfAchievedEvts query", e); }
 
           depEvts.forEach(e => tempTxs.push(parseDeposited(e)));
           withEvts.forEach(e => tempTxs.push(parseWithdrawn(e)));
           incEvts.forEach(e => tempTxs.push(parseLevelIncome(e)));
           perfAchievedEvts.forEach(e => tempTxs.push(parsePerformanceBonusAchieved(e)));
+          
+          // Small delay to prevent hitting public RPC rate limits
+          await new Promise(r => setTimeout(r, 200));
         }
 
         if (tempTxs.length > 0) {
@@ -895,28 +974,46 @@ export default function Dashboard() {
       }
 
       // Generate simulated ledger records for accumulations
-      const simulatedTxs = generateSimulatedLedger(addr, basicInfo, incomeInfo, directs, currentOneDayVal);
+      const simulatedTxs = generateSimulatedLedger(addr, basicInfo, incomeInfo, directs, currentOneDayVal, loadedDirectsMap);
       console.log("On-chain events parsed:", cachedData.txs.length, "Simulated events generated:", simulatedTxs.length, "Total:", cachedData.txs.length + simulatedTxs.length);
 
       // Combine cached on-chain events with simulated yields
       let combinedTxs = [...cachedData.txs, ...simulatedTxs];
 
-      // If RPC rate-limits caused 0 events to be parsed, but user clearly has deposits, inject base records
-      if (cachedData.txs.length === 0 && basicInfo && basicInfo.totalDeposits > 0n) {
-        const userDeposits = parseFloat(ethers.formatUnits(basicInfo.totalDeposits, 18));
-        const userWithdrawn = parseFloat(ethers.formatUnits(basicInfo.totalWithdrawn, 18));
-        const levelInc = parseFloat(ethers.formatUnits(incomeInfo.levelIncomeEarned, 18));
+      // Ensure fundamental transactions exist if RPC drops them due to rate limiting
+      if (basicInfo && basicInfo.totalDeposits > 0n) {
         const mockTime = Number(basicInfo.registrationTime);
-        const mockDownline = (directs && directs.length > 0) ? directs[0] : "0xd1f3e792a188f5f40398ab58087ab95e921be22b";
-
-        if (userDeposits > 0) {
-          combinedTxs.push({ type: "deposit", typeName: "Deposit", fromUser: "Self", amount: userDeposits, level: "-", timestamp: mockTime, status: "Completed", txHash: "0x_fallback_deposit", blockNumber: 0 });
+        
+        if (!combinedTxs.some(t => t.type === "deposit")) {
+          const userDeposits = parseFloat(ethers.formatUnits(basicInfo.totalDeposits, 18));
+          if (userDeposits > 0) {
+            combinedTxs.push({ type: "deposit", typeName: "Deposit", fromUser: "Self", amount: userDeposits, level: "-", timestamp: mockTime, status: "Completed", txHash: "0x_fallback_deposit", blockNumber: 0 });
+          }
         }
-        if (userWithdrawn > 0) {
-          combinedTxs.push({ type: "withdraw", typeName: "Withdrawal", fromUser: "Self", amount: userWithdrawn, level: "-", timestamp: mockTime + 86400, status: "Completed", txHash: "0x_fallback_withdraw", blockNumber: 0 });
+        
+        if (!combinedTxs.some(t => t.type === "withdraw") && basicInfo.totalWithdrawn > 0n) {
+          const userWithdrawn = parseFloat(ethers.formatUnits(basicInfo.totalWithdrawn, 18));
+          if (userWithdrawn > 0) {
+            combinedTxs.push({ type: "withdraw", typeName: "Withdrawal", fromUser: "Self", amount: userWithdrawn, level: "-", timestamp: mockTime + 86400, status: "Completed", txHash: "0x_fallback_withdraw", blockNumber: 0 });
+          }
         }
-        if (levelInc > 0) {
-          combinedTxs.push({ type: "level_income", typeName: "Level Income", fromUser: mockDownline, amount: levelInc, level: "1", timestamp: mockTime + 1800, status: "Completed", txHash: "0x_fallback_level_inc", blockNumber: 0 });
+        
+        const simulatedLevelIncSum = combinedTxs.filter(t => t.type === "level_income").reduce((s, t) => s + t.amount, 0);
+        const totalLevelIncOnChain = parseFloat(ethers.formatUnits(incomeInfo.levelIncomeEarned, 18));
+        const diff = totalLevelIncOnChain - simulatedLevelIncSum;
+        if (diff > 0.01) {
+          const mockDownline = (directs && directs.length > 0) ? directs[0] : "0xd1f3e792a188f5f40398ab58087ab95e921be22b";
+          combinedTxs.push({
+            type: "level_income",
+            typeName: "Level Income",
+            fromUser: "Deeper Downline",
+            amount: diff,
+            level: ">1",
+            timestamp: mockTime + 1800,
+            status: "Completed",
+            txHash: "0x_fallback_level_inc",
+            blockNumber: 0
+          });
         }
       }
 
@@ -1008,30 +1105,16 @@ export default function Dashboard() {
         });
       }
 
-      if (dailyRoi > 0) {
+      if (dailyRoi > 0 || boosterRoi > 0) {
         list.push({
           type: "roi",
           typeName: "Daily ROI Payout",
           fromUser: "Contract",
-          amount: dailyRoi,
+          amount: dailyRoi + boosterRoi,
           level: "-",
           timestamp: mockTime - 7200,
           status: "Completed",
           txHash: "0x_fallback_roi",
-          blockNumber: 0
-        });
-      }
-
-      if (boosterRoi > 0) {
-        list.push({
-          type: "booster_roi",
-          typeName: "Booster ROI Payout",
-          fromUser: "Contract",
-          amount: boosterRoi,
-          level: "-",
-          timestamp: mockTime - 5400,
-          status: "Completed",
-          txHash: "0x_fallback_booster_roi",
           blockNumber: 0
         });
       }
@@ -2086,22 +2169,9 @@ export default function Dashboard() {
               </div>
               <div className="name">Daily ROI</div>
               <div className="amt mono">
-                {displayDailyROI}
+                {(parseFloat(displayDailyROI) + parseFloat(displayBoosterROI)).toFixed(2)}
               </div>
-              <div className="rate">0.5% / day base</div>
-            </div>
-
-            <div className="income-card">
-              <div className="icon">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                  <path d="M12 2l2.6 6.6L21 11l-6.4 2.4L12 20l-2.6-6.6L3 11l6.4-2.4z"/>
-                </svg>
-              </div>
-              <div className="name">ROI Booster</div>
-              <div className="amt mono">
-                {displayBoosterROI}
-              </div>
-              <div className="rate">Booster Rate: {userData.boosterRate}</div>
+              <div className="rate">Active Rate: {userData.boosterRate}</div>
             </div>
 
             <div className="income-card">
@@ -2399,7 +2469,6 @@ export default function Dashboard() {
                   <option value="deposit">Deposit</option>
                   <option value="withdraw">Withdrawal</option>
                   <option value="roi">Daily ROI Payout</option>
-                  <option value="booster_roi">Booster ROI Payout</option>
                   <option value="level_income">Level Income</option>
                   <option value="level_roi">Level ROI Matching</option>
                   <option value="performance">Performance Bonus</option>

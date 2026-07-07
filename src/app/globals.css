@@ -364,7 +364,7 @@ tbody tr:last-child td{border-bottom:none;}
   min-height: 480px;
   max-height: 520px;
   display: flex;
-  justify-content: flex-start;
+  justify-content: safe center;
   align-items: flex-start;
   position: relative;
 }
@@ -449,7 +449,7 @@ tbody tr:last-child td{border-bottom:none;}
 .tree-children-container {
   display: flex;
   flex-direction: row;
-  justify-content: center;
+  justify-content: safe center;
   position: relative;
   padding-top: 32px;
   margin-top: 0px;
