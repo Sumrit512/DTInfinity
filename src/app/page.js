@@ -2322,9 +2322,11 @@ export default function Dashboard() {
                 Explore your hierarchical MLM tree. Click any node to load and expand its direct referrals. Click the crown icon to inspect the root.
               </p>
               
-              <div className="tree-canvas-container" style={{ display: "flex", justifyContent: "center" }}>
+              <div className="tree-canvas-container">
                 {treeRoot ? (
-                  <TreeNodeComponent addr={treeRoot} depth={0} />
+                  <div className="tree-inner-container">
+                    <TreeNodeComponent addr={treeRoot} depth={0} />
+                  </div>
                 ) : (
                   <div style={{ color: "var(--text-muted)", fontSize: "13px" }}>Loading tree...</div>
                 )}
