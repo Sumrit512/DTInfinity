@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import { ethers } from "ethers";
 
 // Default contract addresses (placeholders that user can update in settings)
-const DEFAULT_DT_INFINITY_ADDRESS = "0xa374e919738dc198213a497937f396d275e348f7";
+const DEFAULT_DT_INFINITY_ADDRESS = "0x4ee2e6e9306bd8f5b6e111062aae9c259f7b4df3";
 const DEFAULT_USDT_ADDRESS = "0x0aB8c2DfE9aD2e2D3f58E6006884cda5e6f1E7B9";
 
 // Simple USDT ABI
@@ -33,6 +33,8 @@ const DT_INFINITY_ABI = [
   "function getUserIncomeInfo(address user) external view returns (uint256 dailyROIEarned, uint256 roiBoosterEarned, uint256 levelIncomeEarned, uint256 levelROIEarned, uint256 performanceBonusEarned)",
   "function getUserNetworkInfo(address user) external view returns (uint256 directCount, uint256 qualifiedDirectsCount, uint256 totalTeamCount, uint256 totalTeamVolume, address strongestLegAddress, uint256 strongestLegVolume)",
   "function getPendingBalances(address userAddr) external view returns (uint256 pendingDaily, uint256 pendingBooster, uint256 pendingPerf)",
+  "function getUserDeposits(address userAddr) external view returns (tuple(uint256 amount, uint256 time)[])",
+  "function getUserWithdrawals(address userAddr) external view returns (tuple(uint256 amount, uint256 time)[])",
   "function userLegVolume(address sponsor, address directReferral) external view returns (uint256)",
   "function claimPerformanceBonus(uint256 tierIndex, bool chooseInstant) external",
   "function getPendingPerformanceQualifications(address userAddr) external view returns (tuple(uint256 tierIndex, uint256 target, uint256 instant, uint256 daily, bool isPending, uint256 claimTime, bool isClaimWindowActive)[])",
@@ -64,18 +66,42 @@ export default function Dashboard() {
   const [walletAddress, setWalletAddress] = useState("");
   const [networkName, setNetworkName] = useState("BEP-20 · BSC Testnet");
   const [loading, setLoading] = useState(false);
-  const [txs, setTxs] = useState([]);
+  const [onChainEvents, setOnChainEvents] = useState([]);
   const [copyText, setCopyText] = useState("Copy");
   const [isWrongNetwork, setIsWrongNetwork] = useState(false);
   const [targetChainId, setTargetChainId] = useState(97n);
 
   const [treeRoot, setTreeRoot] = useState("");
-  const [treeNodes, setTreeNodes] = useState({});
+  const [treeNodes, setTreeNodes] = useState(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const stored = localStorage.getItem("DT_INFINITY_TREE_NODES");
+        return stored ? JSON.parse(stored) : {};
+      } catch (e) {
+        console.warn("Failed to read treeNodes from localStorage", e);
+      }
+    }
+    return {};
+  });
+
+  const updateTreeNodes = (newNodes) => {
+    setTreeNodes(prev => {
+      const updated = typeof newNodes === "function" ? newNodes(prev) : { ...prev, ...newNodes };
+      try {
+        localStorage.setItem("DT_INFINITY_TREE_NODES", JSON.stringify(updated));
+      } catch (e) {
+        console.warn("Failed to save treeNodes to localStorage", e);
+      }
+      return updated;
+    });
+  };
+
   const [selectedNode, setSelectedNode] = useState("");
 
   // Contract Addresses (Configurable by user)
   const [dtInfinityAddress, setDtInfinityAddress] = useState(DEFAULT_DT_INFINITY_ADDRESS);
   const [usdtAddress, setUsdtAddress] = useState(DEFAULT_USDT_ADDRESS);
+  const [deploymentBlock, setDeploymentBlock] = useState("0");
 
   // Form states
   const [depositAmount, setDepositAmount] = useState("10");
@@ -151,12 +177,18 @@ export default function Dashboard() {
   useEffect(() => {
     if (typeof window !== "undefined") {
       setOrigin(window.location.origin);
-      const savedDT = localStorage.getItem("DT_INFINITY_ADDRESS");
+      let savedDT = localStorage.getItem("DT_INFINITY_ADDRESS");
+      if (savedDT && savedDT.toLowerCase() === "0xa374e919738dc198213a497937f396d275e348f7") {
+        localStorage.removeItem("DT_INFINITY_ADDRESS");
+        savedDT = null;
+      }
       const savedUSDT = localStorage.getItem("USDT_ADDRESS");
       const savedChain = localStorage.getItem("TARGET_CHAIN_ID");
+      const savedBlock = localStorage.getItem("DT_INFINITY_DEPLOYMENT_BLOCK");
       if (savedDT) setDtInfinityAddress(savedDT);
       if (savedUSDT) setUsdtAddress(savedUSDT);
       if (savedChain) setTargetChainId(BigInt(savedChain));
+      if (savedBlock) setDeploymentBlock(savedBlock);
 
       // Parse referral code from URL query parameters
       const params = new URLSearchParams(window.location.search);
@@ -174,9 +206,22 @@ export default function Dashboard() {
     localStorage.setItem("DT_INFINITY_ADDRESS", dtInfinityAddress);
     localStorage.setItem("USDT_ADDRESS", usdtAddress);
     localStorage.setItem("TARGET_CHAIN_ID", targetChainId.toString());
-    alert("Smart contract addresses updated successfully!");
+    localStorage.setItem("DT_INFINITY_DEPLOYMENT_BLOCK", deploymentBlock);
+    alert("Smart contract configuration updated successfully!");
     if (walletConnected) {
       loadBlockchainData(walletAddress);
+    }
+  };
+
+  // Clear transaction cache to force rebuild
+  const handleResetCache = () => {
+    if (walletAddress) {
+      const cacheKey = `TX_CACHE_${walletAddress.toLowerCase()}`;
+      localStorage.removeItem(cacheKey);
+      alert("Transaction history cache cleared! Rebuilding from block...");
+      loadBlockchainData(walletAddress);
+    } else {
+      alert("Please connect wallet first.");
     }
   };
 
@@ -341,7 +386,7 @@ export default function Dashboard() {
         roiBoosterEarned: formatUSDT(incomeInfo.roiBoosterEarned)
       };
       
-      setTreeNodes(prev => ({
+      updateTreeNodes(prev => ({
         ...prev,
         [addr.toLowerCase()]: nodeData
       }));
@@ -430,7 +475,7 @@ export default function Dashboard() {
         });
 
         setTreeRoot(addr);
-        setTreeNodes(prev => ({
+        updateTreeNodes(prev => ({
           ...prev,
           [addr.toLowerCase()]: {
             address: addr,
@@ -486,7 +531,7 @@ export default function Dashboard() {
               });
               await loadTreeRecursively(nextLevelAddresses, currentLevel + 1);
             };
-            await loadTreeRecursively(directs, 1);
+            loadTreeRecursively(directs, 1);
           } catch (e) {
             console.warn("Failed to recursively auto-load downline referrals", e);
           }
@@ -524,8 +569,40 @@ export default function Dashboard() {
           console.warn("Could not read active bonuses", e);
         }
 
-        // Load transaction logs from contract events
-        fetchEventLogs(dtContract, addr, basicInfo, incomeInfo, directs, currentOneDayVal, loadedDirectsMap);
+        // Load on-chain deposits and withdrawals directly from contract
+        let deposits = [];
+        let withdrawals = [];
+        try {
+          const userDeposits = await dtContract.getUserDeposits(addr);
+          deposits = userDeposits.map((d, i) => ({
+            type: "deposit",
+            typeName: "Deposit",
+            fromUser: "Self",
+            amount: parseFloat(ethers.formatUnits(d.amount || 0n, 18)),
+            level: "-",
+            timestamp: Number(d.time || 0n),
+            status: "Completed",
+            txHash: `0x_dep_${addr}_${i}`,
+            blockNumber: 0
+          }));
+
+          const userWithdrawals = await dtContract.getUserWithdrawals(addr);
+          withdrawals = userWithdrawals.map((w, i) => ({
+            type: "withdraw",
+            typeName: "Withdrawal",
+            fromUser: "Self",
+            amount: parseFloat(ethers.formatUnits(w.amount || 0n, 18)),
+            level: "-",
+            timestamp: Number(w.time || 0n),
+            status: "Completed",
+            txHash: `0x_with_${addr}_${i}`,
+            blockNumber: 0
+          }));
+        } catch (e) {
+          console.warn("Could not read user deposits/withdrawals arrays", e);
+        }
+
+        setOnChainEvents([...deposits, ...withdrawals]);
       } else {
         // Reset user data for unregistered
         setUserData({
@@ -554,7 +631,7 @@ export default function Dashboard() {
           pendingPerf: "0.00"
         });
         setDirectsList([]);
-        setTxs([]);
+        setOnChainEvents([]);
         setPendingQualifications([]);
         setActiveBonuses([]);
       }
@@ -788,340 +865,7 @@ export default function Dashboard() {
     return list;
   }
 
-  // Query events to build a live transaction history
-  async function fetchEventLogs(dtContract, addr, basicInfo = null, incomeInfo = null, directs = null, currentOneDayVal = 86400n, loadedDirectsMap = {}) {
-    // Event parser helpers
-    const parseDeposited = (e) => ({
-      type: "deposit",
-      typeName: "Deposit",
-      fromUser: "Self",
-      amount: parseFloat(ethers.formatUnits(e.args.amount || 0n, 18)),
-      level: "-",
-      timestamp: Number(e.args.time || 0n),
-      status: "Completed",
-      txHash: e.transactionHash,
-      blockNumber: e.blockNumber
-    });
-
-    const parseWithdrawn = (e) => ({
-      type: "withdraw",
-      typeName: "Withdrawal",
-      fromUser: "Self",
-      amount: parseFloat(ethers.formatUnits(e.args.amount || 0n, 18)),
-      level: "-",
-      timestamp: Number(e.args.time || 0n),
-      status: "Completed",
-      txHash: e.transactionHash,
-      blockNumber: e.blockNumber
-    });
-
-    const parseLevelIncome = (e) => ({
-      type: "level_income",
-      typeName: "Level Income",
-      fromUser: e.args.downline,
-      amount: parseFloat(ethers.formatUnits(e.args.amount || 0n, 18)),
-      level: Number(e.args.level || 0n),
-      timestamp: Number(e.args.time || 0n),
-      status: "Completed",
-      txHash: e.transactionHash,
-      blockNumber: e.blockNumber
-    });
-
-    const parseLevelROI = (e) => ({
-      type: "level_roi",
-      typeName: "Level ROI Matching",
-      fromUser: e.args.downline,
-      amount: parseFloat(ethers.formatUnits(e.args.amount || 0n, 18)),
-      level: Number(e.args.level || 0n),
-      timestamp: Number(e.args.time || 0n),
-      status: "Completed",
-      txHash: e.transactionHash,
-      blockNumber: e.blockNumber
-    });
-
-    const parseROIAccumulated = (e) => ({
-      type: "roi",
-      typeName: "Daily ROI Payout",
-      fromUser: "Contract",
-      amount: parseFloat(ethers.formatUnits(e.args.amount || 0n, 18)),
-      level: "-",
-      timestamp: Number(e.args.time || 0n),
-      status: "Completed",
-      txHash: e.transactionHash,
-      blockNumber: e.blockNumber
-    });
-
-    const parseBoosterROIAccumulated = (e) => ({
-      type: "booster_roi",
-      typeName: "Booster ROI Payout",
-      fromUser: "Contract",
-      amount: parseFloat(ethers.formatUnits(e.args.amount || 0n, 18)),
-      level: "-",
-      timestamp: Number(e.args.time || 0n),
-      status: "Completed",
-      txHash: e.transactionHash,
-      blockNumber: e.blockNumber
-    });
-
-    const parsePerformanceDailyPaid = (e) => ({
-      type: "perf_daily",
-      typeName: "Performance Daily Salary",
-      fromUser: "Contract",
-      amount: parseFloat(ethers.formatUnits(e.args.amount || 0n, 18)),
-      level: "-",
-      timestamp: Number(e.args.time || 0n),
-      status: "Completed",
-      txHash: e.transactionHash,
-      blockNumber: e.blockNumber
-    });
-
-    const parsePerformanceBonusAchieved = (e) => ({
-      type: "perf_instant",
-      typeName: "Performance Bonus Achieved",
-      fromUser: "Contract",
-      amount: parseFloat(ethers.formatUnits(e.args.instantReward || 0n, 18)),
-      level: "-",
-      timestamp: Number(e.args.time || 0n),
-      status: "Completed",
-      txHash: e.transactionHash,
-      blockNumber: e.blockNumber
-    });
-
-    const parsePerformanceBonusClaimed = (e) => ({
-      type: "perf_claim",
-      typeName: e.args.chooseInstant ? "Performance Bonus claimed (Instant)" : "Performance Bonus claimed (30d Salary)",
-      fromUser: "Self",
-      amount: 0.0,
-      level: "-",
-      timestamp: Number(e.args.time || 0n),
-      status: "Completed",
-      txHash: e.transactionHash,
-      blockNumber: e.blockNumber
-    });
-
-    try {
-      const provider = new ethers.BrowserProvider(window.ethereum);
-      const currentBlock = await provider.getBlockNumber();
-      
-      // Use a custom stable RPC endpoint for reading events to avoid Metamask browser 403 blocks
-      let queryContract = dtContract;
-      try {
-        const readProvider = new ethers.JsonRpcProvider("https://bsc-testnet-rpc.publicnode.com");
-        queryContract = new ethers.Contract(dtInfinityAddress, DT_INFINITY_ABI, readProvider);
-      } catch (rpcErr) {
-        console.warn("Failed to initialize custom JsonRpcProvider for logs, using default contract instance", rpcErr);
-      }
-      
-      const cacheKey = `TX_CACHE_${addr.toLowerCase()}`;
-      let cachedData = { lastBlock: 0, txs: [] };
-      try {
-        const stored = localStorage.getItem(cacheKey);
-        if (stored) {
-          cachedData = JSON.parse(stored);
-        }
-      } catch (err) {
-        console.warn("Could not read localStorage cache", err);
-      }
-
-      let startBlock = cachedData.lastBlock > 0 ? cachedData.lastBlock + 1 : 0;
-      if (startBlock === 0) {
-        // First load: Look back 4900 blocks to prevent massive query ranges
-        startBlock = currentBlock - 4900 > 0 ? currentBlock - 4900 : 0;
-      }
-
-      if (startBlock <= currentBlock) {
-        // Query new logs in batches of 1000 blocks to prevent RPC rate-limits
-        const BATCH_SIZE = 1000;
-        let tempTxs = [];
-        
-        for (let from = startBlock; from <= currentBlock; from += BATCH_SIZE) {
-          const to = Math.min(from + BATCH_SIZE - 1, currentBlock);
-          
-          let depEvts = [];
-          let withEvts = [];
-          let incEvts = [];
-          let perfAchievedEvts = [];
-
-          try { depEvts = await queryContract.queryFilter(queryContract.filters.Deposited(addr), from, to); } catch (e) { console.warn("Failed depEvts query", e); }
-          try { withEvts = await queryContract.queryFilter(queryContract.filters.Withdrawn(addr), from, to); } catch (e) { console.warn("Failed withEvts query", e); }
-          try { incEvts = await queryContract.queryFilter(queryContract.filters.LevelIncomePaid(addr), from, to); } catch (e) { console.warn("Failed incEvts query", e); }
-          try { perfAchievedEvts = await queryContract.queryFilter(queryContract.filters.PerformanceBonusAchieved(addr), from, to); } catch (e) { console.warn("Failed perfAchievedEvts query", e); }
-
-          depEvts.forEach(e => tempTxs.push(parseDeposited(e)));
-          withEvts.forEach(e => tempTxs.push(parseWithdrawn(e)));
-          incEvts.forEach(e => tempTxs.push(parseLevelIncome(e)));
-          perfAchievedEvts.forEach(e => tempTxs.push(parsePerformanceBonusAchieved(e)));
-          
-          // Small delay to prevent hitting public RPC rate limits
-          await new Promise(r => setTimeout(r, 200));
-        }
-
-        if (tempTxs.length > 0) {
-          // Merge with cached transactions, sorting out duplicates
-          const txMap = new Map();
-          cachedData.txs.forEach(t => txMap.set(`${t.txHash}_${t.type}`, t));
-          tempTxs.forEach(t => txMap.set(`${t.txHash}_${t.type}`, t));
-          
-          cachedData.txs = Array.from(txMap.values());
-        }
-        cachedData.lastBlock = currentBlock;
-        
-        try {
-          localStorage.setItem(cacheKey, JSON.stringify(cachedData));
-        } catch (err) {
-          console.warn("Could not save to localStorage cache", err);
-        }
-      }
-
-      // Generate simulated ledger records for accumulations
-      const simulatedTxs = generateSimulatedLedger(addr, basicInfo, incomeInfo, directs, currentOneDayVal, loadedDirectsMap);
-      console.log("On-chain events parsed:", cachedData.txs.length, "Simulated events generated:", simulatedTxs.length, "Total:", cachedData.txs.length + simulatedTxs.length);
-
-      // Combine cached on-chain events with simulated yields
-      let combinedTxs = [...cachedData.txs, ...simulatedTxs];
-
-      // Ensure fundamental transactions exist if RPC drops them due to rate limiting
-      if (basicInfo && basicInfo.totalDeposits > 0n) {
-        const mockTime = Number(basicInfo.registrationTime);
-        
-        if (!combinedTxs.some(t => t.type === "deposit")) {
-          const userDeposits = parseFloat(ethers.formatUnits(basicInfo.totalDeposits, 18));
-          if (userDeposits > 0) {
-            combinedTxs.push({ type: "deposit", typeName: "Deposit", fromUser: "Self", amount: userDeposits, level: "-", timestamp: mockTime, status: "Completed", txHash: "0x_fallback_deposit", blockNumber: 0 });
-          }
-        }
-        
-        if (!combinedTxs.some(t => t.type === "withdraw") && basicInfo.totalWithdrawn > 0n) {
-          const userWithdrawn = parseFloat(ethers.formatUnits(basicInfo.totalWithdrawn, 18));
-          if (userWithdrawn > 0) {
-            combinedTxs.push({ type: "withdraw", typeName: "Withdrawal", fromUser: "Self", amount: userWithdrawn, level: "-", timestamp: mockTime + 86400, status: "Completed", txHash: "0x_fallback_withdraw", blockNumber: 0 });
-          }
-        }
-        
-        const simulatedLevelIncSum = combinedTxs.filter(t => t.type === "level_income").reduce((s, t) => s + t.amount, 0);
-        const totalLevelIncOnChain = parseFloat(ethers.formatUnits(incomeInfo.levelIncomeEarned, 18));
-        const diff = totalLevelIncOnChain - simulatedLevelIncSum;
-        if (diff > 0.01) {
-          const mockDownline = (directs && directs.length > 0) ? directs[0] : "0xd1f3e792a188f5f40398ab58087ab95e921be22b";
-          combinedTxs.push({
-            type: "level_income",
-            typeName: "Level Income",
-            fromUser: "Deeper Downline",
-            amount: diff,
-            level: ">1",
-            timestamp: mockTime + 1800,
-            status: "Completed",
-            txHash: "0x_fallback_level_inc",
-            blockNumber: 0
-          });
-        }
-      }
-
-      // Sort combined list by timestamp descending
-      combinedTxs.sort((a, b) => b.timestamp - a.timestamp);
-      setTxs(combinedTxs);
-    } catch (e) {
-      console.warn("Could not query contract event logs, generating fallback list", e);
-      // Fallback: Reconstruct transaction logs from on-chain stats if getLogs rate-limits or fails
-      const list = [];
-      const userDeposits = basicInfo ? parseFloat(formatUSDT(basicInfo.totalDeposits)) : (parseFloat(userData.totalDeposits) || 0);
-      const userWithdrawn = basicInfo ? parseFloat(formatUSDT(basicInfo.totalWithdrawn)) : (parseFloat(userData.totalWithdrawn) || 0);
-      const levelInc = incomeInfo ? parseFloat(formatUSDT(incomeInfo.levelIncomeEarned)) : (parseFloat(userData.levelIncomeEarned) || 0);
-      const levelRoi = incomeInfo ? parseFloat(formatUSDT(incomeInfo.levelROIEarned)) : (parseFloat(userData.levelROIEarned) || 0);
-      const rankBonus = incomeInfo ? parseFloat(formatUSDT(incomeInfo.performanceBonusEarned)) : (parseFloat(userData.performanceBonusEarned) || 0);
-      const dailyRoi = incomeInfo ? parseFloat(formatUSDT(incomeInfo.dailyROIEarned)) : (parseFloat(userData.dailyROIEarned) || 0);
-      const boosterRoi = incomeInfo ? parseFloat(formatUSDT(incomeInfo.roiBoosterEarned)) : (parseFloat(userData.roiBoosterEarned) || 0);
-
-      const mockTime = Math.floor(Date.now() / 1000);
-      const mockDownline = (directsList && directsList.length > 0) ? directsList[0] : "0xd1f3e792a188f5f40398ab58087ab95e921be22b";
-
-      if (userDeposits > 0) {
-        list.push({
-          type: "deposit",
-          typeName: "Deposit",
-          fromUser: "Self",
-          amount: userDeposits,
-          level: "-",
-          timestamp: mockTime - 86400,
-          status: "Completed",
-          txHash: "0x_fallback_deposit",
-          blockNumber: 0
-        });
-      }
-
-      if (userWithdrawn > 0) {
-        list.push({
-          type: "withdraw",
-          typeName: "Withdrawal",
-          fromUser: "Self",
-          amount: userWithdrawn,
-          level: "-",
-          timestamp: mockTime - 43200,
-          status: "Completed",
-          txHash: "0x_fallback_withdraw",
-          blockNumber: 0
-        });
-      }
-
-      if (levelInc > 0) {
-        list.push({
-          type: "level_income",
-          typeName: "Level Income",
-          fromUser: mockDownline,
-          amount: levelInc,
-          level: "1",
-          timestamp: mockTime - 3600,
-          status: "Completed",
-          txHash: "0x_fallback_level_inc",
-          blockNumber: 0
-        });
-      }
-
-      if (levelRoi > 0) {
-        list.push({
-          type: "level_roi",
-          typeName: "Level ROI Matching",
-          fromUser: mockDownline,
-          amount: levelRoi,
-          level: "1",
-          timestamp: mockTime - 1800,
-          status: "Completed",
-          txHash: "0x_fallback_level_roi",
-          blockNumber: 0
-        });
-      }
-
-      if (rankBonus > 0) {
-        list.push({
-          type: "perf_instant",
-          typeName: "Performance Bonus Achieved",
-          fromUser: "Contract",
-          amount: rankBonus,
-          level: "-",
-          timestamp: mockTime - 600,
-          status: "Completed",
-          txHash: "0x_fallback_perf",
-          blockNumber: 0
-        });
-      }
-
-      if (dailyRoi > 0 || boosterRoi > 0) {
-        list.push({
-          type: "roi",
-          typeName: "Daily ROI Payout",
-          fromUser: "Contract",
-          amount: dailyRoi + boosterRoi,
-          level: "-",
-          timestamp: mockTime - 7200,
-          status: "Completed",
-          txHash: "0x_fallback_roi",
-          blockNumber: 0
-        });
-      }
-
-      setTxs(list);
-    }
-  }
+  // Event fetching logic removed, replaced with exact tracking arrays
 
   // Mint Test USDT (Mock Token Only)
   async function handleMintUSDT() {
@@ -1187,7 +931,7 @@ export default function Dashboard() {
       // Trigger Deposit
       const sponsor = isRegistered ? ethers.ZeroAddress : sponsorAddress;
       const tx = await dtContract.deposit(parsedAmount, sponsor);
-      await tx.wait();
+      const receipt = await tx.wait();
 
       alert("Deposit processed successfully!");
       await loadBlockchainData(walletAddress);
@@ -1230,7 +974,7 @@ export default function Dashboard() {
       const dtContract = new ethers.Contract(dtInfinityAddress, DT_INFINITY_ABI, signer);
 
       const tx = await dtContract.withdraw(ethers.parseUnits(withdrawAmount, 18));
-      await tx.wait();
+      const receipt = await tx.wait();
 
       alert("Withdrawal claim processed successfully!");
       setWithdrawAmount("");
@@ -1266,7 +1010,7 @@ export default function Dashboard() {
       const dtContract = new ethers.Contract(dtInfinityAddress, DT_INFINITY_ABI, signer);
 
       const tx = await dtContract.claimAll();
-      await tx.wait();
+      const receipt = await tx.wait();
 
       alert("All rewards claimed and transferred successfully!");
       await loadBlockchainData(walletAddress);
@@ -1483,45 +1227,245 @@ export default function Dashboard() {
     }
   }
 
-  // Display-ready values
-  const displayDailyROI = (parseFloat(userData.dailyROIEarned) + displayPendingDaily).toFixed(2);
-  const displayBoosterROI = (parseFloat(userData.roiBoosterEarned) + displayPendingBooster).toFixed(2);
-  const displayPerformanceBonus = (parseFloat(userData.performanceBonusEarned) + displayPendingPerf).toFixed(2);
-  const displayLevelROI = (parseFloat(userData.levelROIEarned) + displayPendingLevelROI).toFixed(2);
+  // Display-ready values calculated chronologically from txs list
+  const txs = useMemo(() => {
+    if (!walletConnected || !isRegistered) return [];
 
-  const totalAvailableBalance = (
-    parseFloat(userData.claimableBalance) + 
-    displayPendingDaily + 
-    displayPendingBooster + 
-    displayPendingLevelROI +
-    displayPendingPerf
-  ).toFixed(2);
+    // 1. Generate simulated ledger records for accumulations using current treeNodes
+    const basicInfoMock = {
+      registrationTime: BigInt(userData.registrationTime),
+      totalDeposits: ethers.parseUnits(userData.totalDeposits, 18),
+      totalWithdrawn: ethers.parseUnits(userData.totalWithdrawn, 18)
+    };
+    const incomeInfoMock = {
+      levelIncomeEarned: ethers.parseUnits(userData.levelIncomeEarned, 18),
+      levelROIEarned: ethers.parseUnits(userData.levelROIEarned, 18),
+      performanceBonusEarned: ethers.parseUnits(userData.performanceBonusEarned, 18),
+      dailyROIEarned: ethers.parseUnits(userData.dailyROIEarned, 18),
+      roiBoosterEarned: ethers.parseUnits(userData.roiBoosterEarned, 18)
+    };
 
-  const totalEarnedAcrossStreams = (
-    parseFloat(userData.dailyROIEarned) +
-    parseFloat(userData.roiBoosterEarned) +
-    parseFloat(userData.levelIncomeEarned) +
-    parseFloat(userData.levelROIEarned) +
-    parseFloat(userData.performanceBonusEarned) +
-    displayPendingDaily +
-    displayPendingBooster +
-    displayPendingLevelROI +
-    displayPendingPerf
-  ).toFixed(2);
+    const simulatedTxs = generateSimulatedLedger(
+      walletAddress,
+      basicInfoMock,
+      incomeInfoMock,
+      directsList,
+      oneDay,
+      treeNodes
+    );
 
-  const currentRoiEarned = initialROIEarned + displayPendingDaily + displayPendingBooster;
+    // 2. Combine with onChainEvents, filtering out simulated duplicates
+    const simulatedFiltered = simulatedTxs.filter(sim => {
+      const isDuplicate = onChainEvents.some(onChain => 
+        onChain.type === sim.type && 
+        onChain.fromUser.toLowerCase() === sim.fromUser.toLowerCase() && 
+        Math.abs(onChain.timestamp - sim.timestamp) < 60
+      );
+      return !isDuplicate;
+    });
+
+    let combinedTxs = [...onChainEvents, ...simulatedFiltered];
+
+    // Ensure fundamental transactions exist
+    const mockTime = userData.registrationTime;
+    const userDeposits = parseFloat(userData.totalDeposits);
+    if (userDeposits > 0) {
+      // Sum up all on-chain deposit events found
+      const onChainDepositsSum = combinedTxs
+        .filter(t => t.type === "deposit" && t.txHash !== "0x_fallback_deposit")
+        .reduce((sum, t) => sum + t.amount, 0);
+
+      // If the sum of found deposits is less than total deposits from the contract state,
+      // add a fallback transaction for the missing difference at the registration time.
+      if (onChainDepositsSum < userDeposits - 0.01) {
+        const missingDepositAmount = userDeposits - onChainDepositsSum;
+        combinedTxs.push({
+          type: "deposit",
+          typeName: "Deposit",
+          fromUser: "Self",
+          amount: missingDepositAmount,
+          level: "-",
+          timestamp: mockTime,
+          status: "Completed",
+          txHash: "0x_fallback_deposit",
+          blockNumber: 0
+        });
+      }
+    }
+
+    const userWithdrawn = parseFloat(userData.totalWithdrawn);
+    if (userWithdrawn > 0) {
+      // Sum up all on-chain withdrawal events found
+      const onChainWithdrawalsSum = combinedTxs
+        .filter(t => t.type === "withdraw" && t.txHash !== "0x_fallback_withdraw")
+        .reduce((sum, t) => sum + t.amount, 0);
+
+      // If the sum of found withdrawals is less than total withdrawn from the contract state,
+      // add a fallback transaction for the missing difference.
+      if (onChainWithdrawalsSum < userWithdrawn - 0.01) {
+        const missingWithdrawalAmount = userWithdrawn - onChainWithdrawalsSum;
+        combinedTxs.push({
+          type: "withdraw",
+          typeName: "Withdrawal",
+          fromUser: "Self",
+          amount: missingWithdrawalAmount,
+          level: "-",
+          timestamp: mockTime + 86400,
+          status: "Completed",
+          txHash: "0x_fallback_withdraw",
+          blockNumber: 0
+        });
+      }
+    }
+
+    const simulatedLevelIncSum = combinedTxs.filter(t => t.type === "level_income").reduce((s, t) => s + t.amount, 0);
+    const totalLevelIncOnChain = parseFloat(userData.levelIncomeEarned);
+    const diff = totalLevelIncOnChain - simulatedLevelIncSum;
+    if (diff > 0.01) {
+      combinedTxs.push({
+        type: "level_income",
+        typeName: "Level Income",
+        fromUser: "Deeper Downline",
+        amount: diff,
+        level: ">1",
+        timestamp: mockTime + 1800,
+        status: "Completed",
+        txHash: "0x_fallback_level_inc",
+        blockNumber: 0
+      });
+    }
+
+    // 3. Apply chronological capping
+    combinedTxs.sort((a, b) => {
+      if (a.timestamp !== b.timestamp) {
+        return a.timestamp - b.timestamp;
+      }
+      if (a.type === "deposit" && b.type !== "deposit") return -1;
+      if (a.type !== "deposit" && b.type === "deposit") return 1;
+      return 0;
+    });
+
+    let runningTotalEarned = 0;
+    let runningROIEarned = 0;
+    let runningDeposit = 0;
+
+    combinedTxs = combinedTxs.map(tx => {
+      if (tx.type === "deposit") {
+        runningDeposit += tx.amount;
+        return tx;
+      }
+      if (tx.type === "withdraw") {
+        return tx;
+      }
+      if (tx.type === "performance" && tx.typeName.includes("Achieved")) {
+        return tx;
+      }
+      
+      const maxNetwork = runningDeposit * 4;
+      const maxROI = runningDeposit * 2.2;
+      
+      const allowedNetwork = Math.max(0, maxNetwork - runningTotalEarned);
+      let allowed = tx.amount;
+      
+      if (tx.type === "roi" || tx.type === "booster_roi") {
+        const allowedROI = Math.max(0, maxROI - runningROIEarned);
+        allowed = Math.min(tx.amount, allowedNetwork, allowedROI);
+        runningROIEarned += allowed;
+      } else {
+        allowed = Math.min(tx.amount, allowedNetwork);
+      }
+      
+      runningTotalEarned += allowed;
+      
+      return {
+        ...tx,
+        amount: allowed
+      };
+    });
+
+    // 4. Sort descending for display
+    combinedTxs.sort((a, b) => {
+      if (a.timestamp !== b.timestamp) {
+        return b.timestamp - a.timestamp;
+      }
+      if (a.type === "deposit" && b.type !== "deposit") return 1;
+      if (a.type !== "deposit" && b.type === "deposit") return -1;
+      return 0;
+    });
+
+    return combinedTxs;
+  }, [onChainEvents, treeNodes, userData, directsList, oneDay, walletConnected, isRegistered]);
+
+  // Display-ready values calculated chronologically from txs list
+  const statsToDisplay = useMemo(() => {
+    // Fallback if txs is empty
+    if (txs.length === 0) {
+      const dailyROI = parseFloat(userData.dailyROIEarned) + displayPendingDaily;
+      const boosterROI = parseFloat(userData.roiBoosterEarned) + displayPendingBooster;
+      const levelIncome = parseFloat(userData.levelIncomeEarned);
+      const levelROI = parseFloat(userData.levelROIEarned) + displayPendingLevelROI;
+      const performance = parseFloat(userData.performanceBonusEarned) + displayPendingPerf;
+      return {
+        dailyROI: dailyROI.toFixed(2),
+        boosterROI: boosterROI.toFixed(2),
+        levelIncome: levelIncome.toFixed(2),
+        levelROI: levelROI.toFixed(2),
+        performance: performance.toFixed(2),
+        totalROI: (dailyROI + boosterROI).toFixed(2),
+        totalEarned: (dailyROI + boosterROI + levelIncome + levelROI + performance).toFixed(2),
+        totalAvailable: (
+          parseFloat(userData.claimableBalance) +
+          displayPendingDaily +
+          displayPendingBooster +
+          displayPendingLevelROI +
+          displayPendingPerf
+        ).toFixed(2)
+      };
+    }
+
+    let dailyROI = 0;
+    let boosterROI = 0;
+    let levelIncome = 0;
+    let levelROI = 0;
+    let performance = 0;
+
+    txs.forEach(tx => {
+      if (tx.type === "roi") dailyROI += tx.amount;
+      else if (tx.type === "booster_roi") boosterROI += tx.amount;
+      else if (tx.type === "level_income") levelIncome += tx.amount;
+      else if (tx.type === "level_roi") levelROI += tx.amount;
+      else if (tx.type === "perf_instant" || tx.type === "perf_daily") performance += tx.amount;
+    });
+
+    const totalEarned = dailyROI + boosterROI + levelIncome + levelROI + performance;
+    const totalWithdrawnVal = parseFloat(userData.totalWithdrawn) || 0;
+    const totalAvailable = Math.max(0, totalEarned - totalWithdrawnVal);
+
+    return {
+      dailyROI: dailyROI.toFixed(2),
+      boosterROI: boosterROI.toFixed(2),
+      levelIncome: levelIncome.toFixed(2),
+      levelROI: levelROI.toFixed(2),
+      performance: performance.toFixed(2),
+      totalROI: (dailyROI + boosterROI).toFixed(2),
+      totalEarned: totalEarned.toFixed(2),
+      totalAvailable: totalAvailable.toFixed(2)
+    };
+  }, [txs, userData, displayPendingDaily, displayPendingBooster, displayPendingLevelROI, displayPendingPerf]);
+
+  const displayDailyROI = parseFloat(statsToDisplay.dailyROI).toFixed(2);
+  const displayBoosterROI = parseFloat(statsToDisplay.boosterROI).toFixed(2);
+  const displayPerformanceBonus = parseFloat(statsToDisplay.performance).toFixed(2);
+  const displayLevelROI = parseFloat(statsToDisplay.levelROI).toFixed(2);
+  const displayLevelIncome = parseFloat(statsToDisplay.levelIncome).toFixed(2);
+
+  const totalAvailableBalance = parseFloat(statsToDisplay.totalAvailable).toFixed(2);
+  const totalEarnedAcrossStreams = parseFloat(statsToDisplay.totalEarned).toFixed(2);
+
+  const currentRoiEarned = parseFloat(statsToDisplay.totalROI);
   const roiCapPercent = maxRoiCap > 0 ? Math.min((currentRoiEarned / maxRoiCap) * 100, 100) : 0;
 
-  const currentNetworkEarned = 
-    parseFloat(userData.levelIncomeEarned) +
-    parseFloat(userData.levelROIEarned) +
-    parseFloat(userData.performanceBonusEarned) +
-    parseFloat(userData.dailyROIEarned) +
-    parseFloat(userData.roiBoosterEarned) +
-    displayPendingDaily +
-    displayPendingBooster +
-    displayPendingLevelROI +
-    displayPendingPerf;
+  const currentNetworkEarned = parseFloat(statsToDisplay.totalEarned);
   const networkCapPercent = maxNetworkCap > 0 ? Math.min((currentNetworkEarned / maxNetworkCap) * 100, 100) : 0;
 
   // Filtered transactions and sum for selection
@@ -2184,7 +2128,7 @@ export default function Dashboard() {
                 </svg>
               </div>
               <div className="name">Level Income</div>
-              <div className="amt mono">{userData.levelIncomeEarned}</div>
+              <div className="amt mono">{displayLevelIncome}</div>
               <div className="rate">5 levels deep</div>
             </div>
 
@@ -2741,6 +2685,11 @@ export default function Dashboard() {
                 
                 <div className="note" style={{ marginTop: "15px" }}>
                   Minimum deposit is 10 USDT. A package activation requires a one-time USDT approval signature.
+                  {isRegistered && (
+                    <div style={{ marginTop: "8px", color: "var(--blue-bright)" }}>
+                      Your current active package is <strong>{userData.totalDeposits} USDT</strong>. To upgrade/top-up, the new deposit amount must be greater than or equal to your current deposit value.
+                    </div>
+                  )}
                 </div>
 
                 {/* Developer Token Mint helper */}
@@ -2835,6 +2784,73 @@ export default function Dashboard() {
               <div className="team-stat">
                 <div className="k">Registered referrals</div>
                 <div className="v">{userData.directCount} members</div>
+              </div>
+            </div>
+          </div>
+
+          <div className="card" style={{ marginBottom: "20px" }}>
+            <div className="section-title" style={{ marginTop: 0 }}>System Configuration</div>
+            <p style={{ color: "var(--text-muted)", fontSize: "13px", lineHeight: "1.6", marginBottom: "15px" }}>
+              Configure smart contract addresses, target blockchain network, and custom event indexing start block.
+            </p>
+            <div className="withdraw-card" style={{ gridTemplateColumns: "1fr" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", marginBottom: "16px" }}>
+                <div className="field" style={{ marginBottom: 0 }}>
+                  <label>DT Infinity Contract Address</label>
+                  <input 
+                    type="text" 
+                    value={dtInfinityAddress} 
+                    onChange={(e) => setDtInfinityAddress(e.target.value)}
+                    placeholder="0x..."
+                  />
+                </div>
+                <div className="field" style={{ marginBottom: 0 }}>
+                  <label>USDT Token Contract Address</label>
+                  <input 
+                    type="text" 
+                    value={usdtAddress} 
+                    onChange={(e) => setUsdtAddress(e.target.value)}
+                    placeholder="0x..."
+                  />
+                </div>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", marginBottom: "16px" }}>
+                <div className="field" style={{ marginBottom: 0 }}>
+                  <label>Target Chain ID</label>
+                  <input 
+                    type="number" 
+                    value={targetChainId.toString()} 
+                    onChange={(e) => setTargetChainId(BigInt(e.target.value || "0"))}
+                    placeholder="e.g. 97"
+                  />
+                </div>
+                <div className="field" style={{ marginBottom: 0 }}>
+                  <label>Contract Deployment Block (Start Block)</label>
+                  <input 
+                    type="number" 
+                    value={deploymentBlock} 
+                    onChange={(e) => setDeploymentBlock(e.target.value)}
+                    placeholder="e.g. 42900000"
+                  />
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: "12px", marginTop: "10px" }}>
+                <button 
+                  onClick={handleSaveConfig} 
+                  className="withdraw-btn" 
+                  style={{ width: "auto", padding: "12px 24px", marginTop: 0 }}
+                  disabled={loading}
+                >
+                  Save Configuration
+                </button>
+                <button 
+                  onClick={handleResetCache} 
+                  className="withdraw-btn" 
+                  style={{ width: "auto", padding: "12px 24px", marginTop: 0, background: "transparent", border: "1px solid var(--border)", color: "var(--text-muted)" }}
+                  disabled={loading}
+                >
+                  Clear Transaction Cache
+                </button>
               </div>
             </div>
           </div>
