@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import { ethers } from "ethers";
 
 // Default contract addresses (placeholders that user can update in settings)
-const DEFAULT_DT_INFINITY_ADDRESS = "0x32116f10442966206c64279105c6d783743fb186";
+const DEFAULT_DT_INFINITY_ADDRESS = "0x32116f10442966206C64279105c6D783743fB186";
 const DEFAULT_USDT_ADDRESS = "0x0aB8c2DfE9aD2e2D3f58E6006884cda5e6f1E7B9";
 
 // Simple USDT ABI
@@ -20,6 +20,7 @@ const USDT_ABI = [
 const DT_INFINITY_ABI = [
   "function usdtToken() external view returns (address)",
   "function ONE_DAY() external view returns (uint256)",
+  "function PERF_ONE_DAY() external view returns (uint256)",
   "function totalUsers() external view returns (uint256)",
   "function totalDeposited() external view returns (uint256)",
   "function totalWithdrawn() external view returns (uint256)",
@@ -37,8 +38,10 @@ const DT_INFINITY_ABI = [
   "function getUserWithdrawals(address userAddr) external view returns (tuple(uint256 amount, uint256 time)[])",
   "function userLegVolume(address sponsor, address directReferral) external view returns (uint256)",
   "function claimPerformanceBonus(uint256 tierIndex, bool chooseInstant) external",
+  "function pendingTiers(address user, uint256 index) external view returns (bool)",
+  "function qualificationMonth(address user, uint256 index) external view returns (uint256)",
   "function getPendingPerformanceQualifications(address userAddr) external view returns (tuple(uint256 tierIndex, uint256 target, uint256 instant, uint256 daily, bool isPending, uint256 claimTime, bool isClaimWindowActive)[])",
-  "function getActiveBonuses(address user) external view returns (tuple(uint256 tierIndex, uint256 dailyRate, uint256 startTime, uint256 endTime, uint256 lastClaimTime)[])",
+  "function getActiveBonuses(address user) external view returns (tuple(uint256 startTime, uint256 lastClaimTime, uint256 dailyRate, uint256 endTime)[])",
   "event Registered(address indexed user, address indexed sponsor, uint256 time)",
   "event Deposited(address indexed user, uint256 amount, uint256 time)",
   "event Withdrawn(address indexed user, uint256 amount, uint256 time)",
@@ -157,6 +160,7 @@ export default function Dashboard() {
   
   // Real-time ticking simulation states
   const [oneDay, setOneDay] = useState(86400n);
+  const [perfOneDay, setPerfOneDay] = useState(86400n);
   const [secondsSinceSync, setSecondsSinceSync] = useState(0);
 
   // Mobile responsiveness sidebar state
@@ -441,11 +445,19 @@ export default function Dashboard() {
       // 2. Check registration and load user data
       const dtContract = new ethers.Contract(dtInfinityAddress, DT_INFINITY_ABI, provider);
       let currentOneDayVal = 86400n;
+      let currentPerfOneDayVal = 86400n;
       try {
         currentOneDayVal = await dtContract.ONE_DAY();
         setOneDay(currentOneDayVal);
       } catch (e) {
         console.warn("Could not read ONE_DAY", e);
+      }
+      try {
+        currentPerfOneDayVal = await dtContract.PERF_ONE_DAY();
+        setPerfOneDay(currentPerfOneDayVal);
+      } catch (e) {
+        console.warn("Could not read PERF_ONE_DAY", e);
+        currentPerfOneDayVal = currentOneDayVal;
       }
       
       let registered = false;
@@ -574,13 +586,55 @@ export default function Dashboard() {
         // Load active performance bonuses
         try {
           const bonuses = await dtContract.getActiveBonuses(addr);
-          const bonusesMapped = bonuses.map(b => ({
-            tierIndex: Number(b.tierIndex),
-            dailyRate: parseFloat(ethers.formatUnits(b.dailyRate, 18)),
-            startTime: Number(b.startTime),
-            endTime: Number(b.endTime),
-            lastClaimTime: Number(b.lastClaimTime)
-          }));
+          let bonusesMapped = bonuses.map(b => {
+            const dailyRateVal = parseFloat(ethers.formatUnits(b.dailyRate || 0n, 18));
+            let tierIndex = 0;
+            for (let t = 0; t < PERFORMANCE_TIERS.length; t++) {
+              if (Math.abs(PERFORMANCE_TIERS[t].daily - dailyRateVal) < 0.1) {
+                tierIndex = t;
+                break;
+              }
+            }
+            return {
+              tierIndex,
+              dailyRate: dailyRateVal,
+              startTime: Number(b.startTime || 0n),
+              endTime: Number(b.endTime || 0n),
+              lastClaimTime: Number(b.lastClaimTime || 0n)
+            };
+          });
+
+          // Check if there are any pending tiers that have expired (auto-claimable)
+          // and push them into the simulated active bonuses array.
+          const PERF_ONE_DAY_SECS = Number(currentPerfOneDayVal || 86400n);
+          for (let t = 0; t < 6; t++) {
+            try {
+              const isPending = await dtContract.pendingTiers(addr, t);
+              if (isPending) {
+                const claimTime = Number(await dtContract.qualificationMonth(addr, t));
+                const now = Math.floor(Date.now() / 1000);
+                if (now >= claimTime + PERF_ONE_DAY_SECS) {
+                  // This tier has expired and is auto-claimable as Daily stream!
+                  const dailyRateVal = PERFORMANCE_TIERS[t].daily;
+                  const startTimeVal = claimTime;
+                  const endTimeVal = claimTime + 30 * PERF_ONE_DAY_SECS;
+                  
+                  if (!bonusesMapped.some(b => b.tierIndex === t)) {
+                    bonusesMapped.push({
+                      tierIndex: t,
+                      dailyRate: dailyRateVal,
+                      startTime: startTimeVal,
+                      endTime: endTimeVal,
+                      lastClaimTime: startTimeVal
+                    });
+                  }
+                }
+              }
+            } catch (err) {
+              console.warn(`Could not check pendingTiers mapping for tier ${t}`, err);
+            }
+          }
+
           setActiveBonuses(bonusesMapped);
         } catch (e) {
           console.warn("Could not read active bonuses", e);
@@ -624,7 +678,54 @@ export default function Dashboard() {
           console.warn("Could not read user deposits/withdrawals arrays", e);
         }
 
-        setOnChainEvents([...deposits, ...withdrawals]);
+        // Fetch PerformanceBonusClaimed events using robust public RPC endpoints loop
+        let perfClaims = [];
+        const rpcUrls = [
+          "https://bsc-testnet.publicnode.com",
+          "https://data-seed-prebsc-1-s1.binance.org:8545",
+          "https://data-seed-prebsc-2-s1.binance.org:8545"
+        ];
+        
+        for (const url of rpcUrls) {
+          try {
+            const publicProvider = new ethers.JsonRpcProvider(url);
+            const latestBlock = Number(await publicProvider.getBlockNumber());
+            let fromBlockVal = deploymentBlock ? (isNaN(Number(deploymentBlock)) ? 0 : Number(deploymentBlock)) : 0;
+            if (fromBlockVal === 0 || (latestBlock - fromBlockVal) > 49000) {
+              fromBlockVal = Math.max(0, latestBlock - 49000);
+            }
+            const dtContractPublic = new ethers.Contract(dtInfinityAddress, DT_INFINITY_ABI, publicProvider);
+            const filter = await dtContractPublic.filters.PerformanceBonusClaimed(addr);
+            const events = await dtContractPublic.queryFilter(filter, fromBlockVal);
+            
+            if (events) {
+              perfClaims = events.map((event, idx) => {
+                const args = event.args;
+                const tierIdx = Number(args.tierIndex);
+                const chooseInstant = args.chooseInstant;
+                const time = Number(args.time);
+                const tier = PERFORMANCE_TIERS[tierIdx];
+                
+                return {
+                  type: chooseInstant ? "perf_instant" : "perf_claim",
+                  typeName: chooseInstant ? "Performance Bonus (Instant)" : "Performance Bonus Claimed",
+                  fromUser: "Contract",
+                  amount: chooseInstant ? tier.instant : 0,
+                  level: "-",
+                  timestamp: time,
+                  status: "Completed",
+                  txHash: event.transactionHash || `0x_perf_claim_${addr}_${idx}`,
+                  blockNumber: Number(event.blockNumber || 0)
+                };
+              });
+              break; // successfully queried events, break loop
+            }
+          } catch (err) {
+            console.warn(`Query logs failed on RPC ${url}, trying next...`);
+          }
+        }
+
+        setOnChainEvents([...deposits, ...withdrawals, ...perfClaims]);
       } else {
         // Reset user data for unregistered
         setUserData({
@@ -664,10 +765,11 @@ export default function Dashboard() {
   }
 
   // Locally simulate transaction ledger for ROI and Matching
-  function generateSimulatedLedger(addr, basicInfo, incomeInfo, directs, currentOneDayVal, loadedDirectsMap = {}, userDeposits = []) {
+  function generateSimulatedLedger(addr, basicInfo, incomeInfo, directs, currentOneDayVal, loadedDirectsMap = {}, userDeposits = [], currentPerfOneDayVal = 86400n) {
     const sponsorJoin = Number(basicInfo?.registrationTime || 0);
     const sponsorDeposit = basicInfo ? parseFloat(ethers.formatUnits(basicInfo.totalDeposits, 18)) : 0;
     const ONE_DAY_SECS = Number(currentOneDayVal || 86400n);
+    const PERF_ONE_DAY_SECS = Number(currentPerfOneDayVal || 86400n);
     const now = Math.floor(Date.now() / 1000);
     const numDays = Math.floor((now - sponsorJoin) / ONE_DAY_SECS);
 
@@ -807,11 +909,7 @@ export default function Dashboard() {
     }
 
     // Initialize sponsor's cumulative earnings tracker
-    let sponsorCumulativeTotalEarned = parseFloat(userData.dailyROIEarned || 0)
-      + parseFloat(userData.roiBoosterEarned || 0)
-      + parseFloat(userData.levelIncomeEarned || 0)
-      + parseFloat(userData.levelROIEarned || 0)
-      + parseFloat(userData.performanceBonusEarned || 0);
+    let sponsorCumulativeTotalEarned = 0;
 
     // 1. Generate Daily & Booster ROI Payouts
     for (let d = 1; d <= numDays; d++) {
@@ -864,100 +962,104 @@ export default function Dashboard() {
         });
       }
 
-      // 2. Level ROI Matching (15% of directs' daily + booster ROI payouts)
-      const qualifiedDirectsOnDay = directsData.filter(dr => dr.registrationTime <= dayTime && dr.totalDeposits >= 50).length;
-      if (currentDeposit >= 50 && qualifiedDirectsOnDay >= 1) {
-        for (const child of directsData) {
-          if (child.registrationTime > dayTime) continue;
-          if (child.totalDeposits < 50) continue;
+    }
 
-          const childActiveSecs = dayTime - child.registrationTime;
-          if (childActiveSecs >= ONE_DAY_SECS) {
-            let childRateBps = 50;
-            const childNode = loadedDirectsMap[child.address.toLowerCase()] || treeNodes[child.address.toLowerCase()];
-            if (childNode && childNode.children && childNode.children.length > 0) {
-              const childDirectsData = [];
-              childNode.children.forEach(gcAddr => {
-                const gcNode = loadedDirectsMap[gcAddr.toLowerCase()] || treeNodes[gcAddr.toLowerCase()];
-                if (gcNode) {
-                  childDirectsData.push({
-                    registrationTime: gcNode.registrationTime,
-                    totalDeposits: parseFloat(gcNode.totalDeposits)
-                  });
-                }
+    // 2. Level ROI Matching (15% of directs' daily + booster ROI payouts)
+    // Simulated chronologically based on each direct downline's own yield payouts
+    directsData.forEach(child => {
+      if (child.totalDeposits < 50) return;
+
+      const numChildDays = Math.floor((now - child.registrationTime) / ONE_DAY_SECS);
+      const childNode = loadedDirectsMap[child.address.toLowerCase()] || treeNodes[child.address.toLowerCase()];
+      
+      let childNonRoi = 0;
+      if (childNode) {
+        childNonRoi = parseFloat(childNode.levelIncomeEarned || 0)
+          + parseFloat(childNode.levelROIEarned || 0)
+          + parseFloat(childNode.performanceBonusEarned || 0);
+      }
+      let childCumulative = childNonRoi;
+
+      for (let k = 1; k <= numChildDays; k++) {
+        const matchTime = child.registrationTime + k * ONE_DAY_SECS;
+
+        // Determine child's booster rate at the matching time
+        let childRateBps = 50;
+        if (childNode && childNode.children && childNode.children.length > 0) {
+          const childDirectsData = [];
+          childNode.children.forEach(gcAddr => {
+            const gcNode = loadedDirectsMap[gcAddr.toLowerCase()] || treeNodes[gcAddr.toLowerCase()];
+            if (gcNode) {
+              childDirectsData.push({
+                registrationTime: gcNode.registrationTime,
+                totalDeposits: parseFloat(gcNode.totalDeposits)
               });
-              
-              let cRefs5 = 0, cRefs10 = 0, cRefs15 = 0, cRefs20 = 0, cRefs25 = 0;
-              for (const gc of childDirectsData) {
-                if (gc.registrationTime > dayTime) continue;
-                if (gc.registrationTime > child.registrationTime + 25 * ONE_DAY_SECS) continue;
-                if (gc.totalDeposits >= child.totalDeposits) {
-                  if (gc.registrationTime >= child.registrationTime) {
-                    const diff = gc.registrationTime - child.registrationTime;
-                    if (diff <= 5 * ONE_DAY_SECS) cRefs5++;
-                    if (diff <= 10 * ONE_DAY_SECS) cRefs10++;
-                    if (diff <= 15 * ONE_DAY_SECS) cRefs15++;
-                    if (diff <= 20 * ONE_DAY_SECS) cRefs20++;
-                    if (diff <= 25 * ONE_DAY_SECS) cRefs25++;
-                  }
-                }
+            }
+          });
+          
+          let cRefs5 = 0, cRefs10 = 0, cRefs15 = 0, cRefs20 = 0, cRefs25 = 0;
+          for (const gc of childDirectsData) {
+            if (gc.registrationTime > matchTime) continue;
+            if (gc.registrationTime > child.registrationTime + 25 * ONE_DAY_SECS) continue;
+            if (gc.totalDeposits >= child.totalDeposits) {
+              if (gc.registrationTime >= child.registrationTime) {
+                const diff = gc.registrationTime - child.registrationTime;
+                if (diff <= 5 * ONE_DAY_SECS) cRefs5++;
+                if (diff <= 10 * ONE_DAY_SECS) cRefs10++;
+                if (diff <= 15 * ONE_DAY_SECS) cRefs15++;
+                if (diff <= 20 * ONE_DAY_SECS) cRefs20++;
+                if (diff <= 25 * ONE_DAY_SECS) cRefs25++;
               }
-              if (cRefs25 >= 10) childRateBps = 500;
-              else if (cRefs20 >= 8) childRateBps = 250;
-              else if (cRefs15 >= 6) childRateBps = 200;
-              else if (cRefs10 >= 4) childRateBps = 150;
-              else if (cRefs5 >= 2) childRateBps = 100;
-            }
-
-            const childRoiAmt = (child.totalDeposits * childRateBps) / 10000;
-            const childMaxROI = child.totalDeposits * 2.2;
-            let actualChildRoi = childRoiAmt;
-            if (child.cumulativeTotalEarned >= childMaxROI) {
-              actualChildRoi = 0;
-            } else if (child.cumulativeTotalEarned + childRoiAmt > childMaxROI) {
-              actualChildRoi = childMaxROI - child.cumulativeTotalEarned;
-            }
-            
-            // Accumulate child's simulated earnings
-            child.cumulativeTotalEarned += actualChildRoi;
-
-            const levelRoiCommission = (actualChildRoi * 1500) / 10000;
-            
-            // Cap Level ROI Matching commission by sponsor's own 400% Network Cap
-            let allowedCommission = levelRoiCommission;
-            if (sponsorCumulativeTotalEarned >= maxNetworkCap) {
-              allowedCommission = 0;
-            } else if (sponsorCumulativeTotalEarned + levelRoiCommission > maxNetworkCap) {
-              allowedCommission = maxNetworkCap - sponsorCumulativeTotalEarned;
-            }
-            sponsorCumulativeTotalEarned += allowedCommission;
-
-            if (allowedCommission > 0) {
-              list.push({
-                type: "level_roi",
-                typeName: "Level ROI Matching",
-                fromUser: child.address,
-                amount: allowedCommission,
-                level: 1,
-                timestamp: dayTime,
-                status: "Completed",
-                txHash: `0x_lroi_${child.address}_${d}`,
-                blockNumber: 0
-              });
             }
           }
+          if (cRefs25 >= 10) childRateBps = 500;
+          else if (cRefs20 >= 8) childRateBps = 250;
+          else if (cRefs15 >= 6) childRateBps = 200;
+          else if (cRefs10 >= 4) childRateBps = 150;
+          else if (cRefs5 >= 2) childRateBps = 100;
+        }
+
+        const childRoiAmt = (child.totalDeposits * childRateBps) / 10000;
+        const childMaxROI = child.totalDeposits * 2.2;
+        let actualChildRoi = childRoiAmt;
+        if (childCumulative >= childMaxROI) {
+          actualChildRoi = 0;
+        } else if (childCumulative + childRoiAmt > childMaxROI) {
+          actualChildRoi = childMaxROI - childCumulative;
+        }
+        
+        childCumulative += actualChildRoi;
+
+        // Check if sponsor qualifies at matchTime
+        const sponsorDeposit = getActiveDepositAtTime(matchTime);
+        const qualifiedDirectsOnDay = directsData.filter(dr => dr.registrationTime <= matchTime && dr.totalDeposits >= 50).length;
+
+        if (sponsorDeposit >= 50 && qualifiedDirectsOnDay >= 1 && actualChildRoi > 0) {
+          const levelRoiCommission = (actualChildRoi * 1500) / 10000;
+          
+          list.push({
+            type: "level_roi",
+            typeName: "Level ROI Matching",
+            fromUser: child.address,
+            amount: levelRoiCommission,
+            level: 1,
+            timestamp: matchTime,
+            status: "Completed",
+            txHash: `0x_lroi_${child.address.toLowerCase()}_${k}`,
+            blockNumber: 0
+          });
         }
       }
-    }
+    });
 
     // 3. Generate Performance Daily Salaries
     activeBonuses.forEach((bonus, bIdx) => {
       const streamStart = bonus.startTime;
       const streamEnd = Math.min(now, bonus.endTime);
-      const streamDays = Math.floor((streamEnd - streamStart) / ONE_DAY_SECS);
+      const streamDays = Math.floor((streamEnd - streamStart) / PERF_ONE_DAY_SECS);
       
       for (let day = 1; day <= streamDays; day++) {
-        const salaryTime = streamStart + day * ONE_DAY_SECS;
+        const salaryTime = streamStart + day * PERF_ONE_DAY_SECS;
         
         // Cap by the 400% Network Cap
         const currentDeposit = getActiveDepositAtTime(salaryTime);
@@ -1377,7 +1479,8 @@ export default function Dashboard() {
       directsList,
       oneDay,
       treeNodes,
-      onChainEvents.filter(e => e.type === "deposit")
+      onChainEvents.filter(e => e.type === "deposit"),
+      perfOneDay
     );
 
     // 2. Combine with onChainEvents, filtering out simulated duplicates
@@ -1461,6 +1564,40 @@ export default function Dashboard() {
       });
     }
 
+    // Performance Bonus: compare total on-chain claimed performance bonus with simulated daily performance bonus stream
+    // that has been claimed on-chain and any already found on-chain instant payouts. The difference represents the fallback instant payouts.
+    const foundPerfInstantSum = combinedTxs
+      .filter(t => t.type === "perf_instant" && t.txHash !== "0x_synthetic_perf_instant")
+      .reduce((sum, t) => sum + t.amount, 0);
+
+    let simulatedPerfDailyClaimedSum = 0;
+    combinedTxs.forEach(t => {
+      if (t.type === "perf_daily") {
+        const activeBonus = activeBonuses.find(b => t.timestamp >= b.startTime && t.timestamp <= b.endTime);
+        if (activeBonus) {
+          if (t.timestamp <= activeBonus.lastClaimTime) {
+            simulatedPerfDailyClaimedSum += t.amount;
+          }
+        }
+      }
+    });
+
+    const totalPerfClaimedOnChain = parseFloat(userData.performanceBonusEarned || 0);
+    const perfInstantDiff = totalPerfClaimedOnChain - (simulatedPerfDailyClaimedSum + foundPerfInstantSum);
+    if (perfInstantDiff > 0.01) {
+      combinedTxs.push({
+        type: "perf_instant",
+        typeName: "Performance Bonus (Instant)",
+        fromUser: "Contract",
+        amount: perfInstantDiff,
+        level: "-",
+        timestamp: mockTime + 1800, // fallback: 30 minutes after registration
+        status: "Completed",
+        txHash: "0x_synthetic_perf_instant",
+        blockNumber: 0
+      });
+    }
+
     // 3. Apply chronological capping
     combinedTxs.sort((a, b) => {
       if (a.timestamp !== b.timestamp) {
@@ -1520,7 +1657,7 @@ export default function Dashboard() {
     });
 
     return combinedTxs;
-  }, [onChainEvents, treeNodes, userData, directsList, oneDay, walletConnected, isRegistered]);
+  }, [onChainEvents, treeNodes, userData, directsList, oneDay, perfOneDay, activeBonuses, walletConnected, isRegistered]);
 
   // Display-ready values calculated chronologically from txs list
   const statsToDisplay = useMemo(() => {
