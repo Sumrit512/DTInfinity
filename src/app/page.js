@@ -849,36 +849,17 @@ export default function Dashboard() {
       
       sponsorCumulativeTotalEarned += actualDailyRoi;
       
-      let displayRoi = actualDailyRoi;
-      let displayBooster = 0;
-      if (rateBps > 0) {
-        displayRoi = (actualDailyRoi * 50) / rateBps;
-        displayBooster = actualDailyRoi - displayRoi;
-      }
-      
-      if (displayRoi > 0) {
+      if (actualDailyRoi > 0) {
+        const isBoosted = rateBps > 50;
         list.push({
           type: "roi",
-          typeName: "Daily ROI Payout",
+          typeName: isBoosted ? "Daily & Booster ROI Payout" : "Daily ROI Payout",
           fromUser: "Contract",
-          amount: displayRoi,
+          amount: actualDailyRoi,
           level: "-",
           timestamp: dayTime,
           status: "Completed",
           txHash: `0x_roi_${d}`,
-          blockNumber: 0
-        });
-      }
-      if (displayBooster > 0) {
-        list.push({
-          type: "booster_roi",
-          typeName: "Booster ROI Payout",
-          fromUser: "Contract",
-          amount: displayBooster,
-          level: "-",
-          timestamp: dayTime,
-          status: "Completed",
-          txHash: `0x_booster_${d}`,
           blockNumber: 0
         });
       }
