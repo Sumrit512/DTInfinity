@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import { ethers } from "ethers";
 
 // Default contract addresses (placeholders that user can update in settings)
-const DEFAULT_DT_INFINITY_ADDRESS = "0x4ee2e6e9306bd8f5b6e111062aae9c259f7b4df3";
+const DEFAULT_DT_INFINITY_ADDRESS = "0x32116f10442966206c64279105c6d783743fb186";
 const DEFAULT_USDT_ADDRESS = "0x0aB8c2DfE9aD2e2D3f58E6006884cda5e6f1E7B9";
 
 // Simple USDT ABI
@@ -112,6 +112,7 @@ export default function Dashboard() {
   // Live Smart Contract Data
   const [contractUSDTBalance, setContractUSDTBalance] = useState("0.00");
   const [walletUSDTBalance, setWalletUSDTBalance] = useState("0.00");
+  const [lastDepositAmount, setLastDepositAmount] = useState("0.00");
   const [isRegistered, setIsRegistered] = useState(false);
   const [userData, setUserData] = useState({
     sponsor: ethers.ZeroAddress,
@@ -152,6 +153,7 @@ export default function Dashboard() {
   const [filterEndDate, setFilterEndDate] = useState("");
   const [searchFromUser, setSearchFromUser] = useState("");
   const [searchLevel, setSearchLevel] = useState("");
+  const [currentPage, setCurrentPage] = useState(1);
   
   // Real-time ticking simulation states
   const [oneDay, setOneDay] = useState(86400n);
@@ -178,7 +180,11 @@ export default function Dashboard() {
     if (typeof window !== "undefined") {
       setOrigin(window.location.origin);
       let savedDT = localStorage.getItem("DT_INFINITY_ADDRESS");
-      if (savedDT && savedDT.toLowerCase() === "0xa374e919738dc198213a497937f396d275e348f7") {
+      if (savedDT && (
+        savedDT.toLowerCase() === "0xa374e919738dc198213a497937f396d275e348f7" || 
+        savedDT.toLowerCase() === "0x4ee2e6e9306bd8f5b6e111062aae9c259f7b4df3" ||
+        savedDT.toLowerCase() === "0xa2306ed14dc4e1f0c876260621e7dba5a7797eff"
+      )) {
         localStorage.removeItem("DT_INFINITY_ADDRESS");
         savedDT = null;
       }
@@ -200,6 +206,11 @@ export default function Dashboard() {
       }
     }
   }, []);
+
+  // Reset pagination page when search filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filterType, filterLevel, filterStartDate, filterEndDate, searchFromUser, searchLevel]);
 
   // Save contract configuration
   const handleSaveConfig = () => {
@@ -383,7 +394,10 @@ export default function Dashboard() {
         children: directs,
         boosterRate: Number(boosterRate) / 100,
         dailyROIEarned: formatUSDT(incomeInfo.dailyROIEarned),
-        roiBoosterEarned: formatUSDT(incomeInfo.roiBoosterEarned)
+        roiBoosterEarned: formatUSDT(incomeInfo.roiBoosterEarned),
+        levelIncomeEarned: formatUSDT(incomeInfo.levelIncomeEarned),
+        levelROIEarned: formatUSDT(incomeInfo.levelROIEarned),
+        performanceBonusEarned: formatUSDT(incomeInfo.performanceBonusEarned)
       };
       
       updateTreeNodes(prev => ({
@@ -492,7 +506,10 @@ export default function Dashboard() {
             children: directs,
             boosterRate: Number(boosterRate) / 100,
             dailyROIEarned: formatUSDT(incomeInfo.dailyROIEarned),
-            roiBoosterEarned: formatUSDT(incomeInfo.roiBoosterEarned)
+            roiBoosterEarned: formatUSDT(incomeInfo.roiBoosterEarned),
+            levelIncomeEarned: formatUSDT(incomeInfo.levelIncomeEarned),
+            levelROIEarned: formatUSDT(incomeInfo.levelROIEarned),
+            performanceBonusEarned: formatUSDT(incomeInfo.performanceBonusEarned)
           }
         }));
         if (!selectedNode) {
@@ -574,6 +591,11 @@ export default function Dashboard() {
         let withdrawals = [];
         try {
           const userDeposits = await dtContract.getUserDeposits(addr);
+          if (userDeposits && userDeposits.length > 0) {
+            setLastDepositAmount(formatUSDT(userDeposits[userDeposits.length - 1].amount));
+          } else {
+            setLastDepositAmount(formatUSDT(basicInfo.totalDeposits));
+          }
           deposits = userDeposits.map((d, i) => ({
             type: "deposit",
             typeName: "Deposit",
@@ -634,6 +656,7 @@ export default function Dashboard() {
         setOnChainEvents([]);
         setPendingQualifications([]);
         setActiveBonuses([]);
+        setLastDepositAmount("0.00");
       }
     } catch (err) {
       console.error("Error loading blockchain data", err);
@@ -641,12 +664,29 @@ export default function Dashboard() {
   }
 
   // Locally simulate transaction ledger for ROI and Matching
-  function generateSimulatedLedger(addr, basicInfo, incomeInfo, directs, currentOneDayVal, loadedDirectsMap = {}) {
+  function generateSimulatedLedger(addr, basicInfo, incomeInfo, directs, currentOneDayVal, loadedDirectsMap = {}, userDeposits = []) {
     const sponsorJoin = Number(basicInfo?.registrationTime || 0);
     const sponsorDeposit = basicInfo ? parseFloat(ethers.formatUnits(basicInfo.totalDeposits, 18)) : 0;
     const ONE_DAY_SECS = Number(currentOneDayVal || 86400n);
     const now = Math.floor(Date.now() / 1000);
     const numDays = Math.floor((now - sponsorJoin) / ONE_DAY_SECS);
+
+    // Calculate initial deposit and setup chronological deposit tracking
+    const sortedDeps = [...userDeposits].sort((a, b) => a.timestamp - b.timestamp);
+    const upgradeDepositsSum = sortedDeps
+      .filter(d => d.timestamp > sponsorJoin)
+      .reduce((sum, d) => sum + d.amount, 0);
+    const initialDep = Math.max(0, sponsorDeposit - upgradeDepositsSum);
+
+    function getActiveDepositAtTime(timestamp) {
+      let activeDep = initialDep;
+      sortedDeps.forEach(dep => {
+        if (dep.timestamp <= timestamp && dep.timestamp > sponsorJoin) {
+          activeDep += dep.amount;
+        }
+      });
+      return activeDep;
+    }
 
     console.log("Simulating ledger debug:", {
       basicInfoExists: !!basicInfo,
@@ -662,6 +702,25 @@ export default function Dashboard() {
       console.log("Simulating ledger exit: conditions not met");
       return [];
     }
+
+    // Load directs data first to check qualifications
+    const directsData = [];
+    const directsToUse = directs || directsList;
+    directsToUse.forEach(childAddr => {
+      const node = loadedDirectsMap[childAddr.toLowerCase()] || treeNodes[childAddr.toLowerCase()];
+      if (node) {
+        directsData.push({
+          address: childAddr,
+          registrationTime: node.registrationTime,
+          totalDeposits: parseFloat(node.totalDeposits),
+          cumulativeTotalEarned: parseFloat(node.dailyROIEarned || 0)
+            + parseFloat(node.roiBoosterEarned || 0)
+            + parseFloat(node.levelIncomeEarned || 0)
+            + parseFloat(node.levelROIEarned || 0)
+            + parseFloat(node.performanceBonusEarned || 0)
+        });
+      }
+    });
 
     const list = [];
 
@@ -687,7 +746,10 @@ export default function Dashboard() {
             const childNode = loadedDirectsMap[childKey] || treeNodes[childKey];
             if (childNode) {
               const depositVal = parseFloat(childNode.totalDeposits || 0);
-              if (depositVal > 0) {
+              const currentSponsorDeposit = getActiveDepositAtTime(childNode.registrationTime);
+              const qualifiedDirectsAtTime = directsData.filter(dr => dr.registrationTime <= childNode.registrationTime && dr.totalDeposits >= 50).length;
+
+              if (depositVal >= 50 && currentSponsorDeposit >= 50 && qualifiedDirectsAtTime >= curr.level + 1) {
                 const pct = levelIncomePercentages[curr.level]; // Level 1 is index 0
                 const amount = (depositVal * pct) / 10000;
                 if (amount > 0) {
@@ -716,20 +778,6 @@ export default function Dashboard() {
       return list;
     }
 
-    // Load directs data
-    const directsData = [];
-    const directsToUse = directs || directsList;
-    directsToUse.forEach(childAddr => {
-      const node = loadedDirectsMap[childAddr.toLowerCase()] || treeNodes[childAddr.toLowerCase()];
-      if (node) {
-        directsData.push({
-          address: childAddr,
-          registrationTime: node.registrationTime,
-          totalDeposits: parseFloat(node.totalDeposits)
-        });
-      }
-    });
-
     // Helper to calculate booster rate on a given timestamp
     function getBoosterRateAtTime(timestamp) {
       let refs5 = 0, refs10 = 0, refs15 = 0, refs20 = 0, refs25 = 0;
@@ -737,7 +785,8 @@ export default function Dashboard() {
         if (d.registrationTime > timestamp) continue;
         if (d.registrationTime > sponsorJoin + 25 * ONE_DAY_SECS) continue;
 
-        if (d.totalDeposits >= sponsorDeposit) {
+        const currentSponsorDeposit = getActiveDepositAtTime(timestamp);
+        if (d.totalDeposits >= currentSponsorDeposit) {
           if (d.registrationTime >= sponsorJoin) {
             const diff = d.registrationTime - sponsorJoin;
             if (diff <= 5 * ONE_DAY_SECS) refs5++;
@@ -757,28 +806,86 @@ export default function Dashboard() {
       return 50;
     }
 
+    // Initialize sponsor's cumulative earnings tracker
+    let sponsorCumulativeTotalEarned = parseFloat(userData.dailyROIEarned || 0)
+      + parseFloat(userData.roiBoosterEarned || 0)
+      + parseFloat(userData.levelIncomeEarned || 0)
+      + parseFloat(userData.levelROIEarned || 0)
+      + parseFloat(userData.performanceBonusEarned || 0);
+
     // 1. Generate Daily & Booster ROI Payouts
     for (let d = 1; d <= numDays; d++) {
       const dayTime = sponsorJoin + d * ONE_DAY_SECS;
+      const dayStart = dayTime - ONE_DAY_SECS;
       const rateBps = getBoosterRateAtTime(dayTime);
-      
-      // Daily ROI (Includes booster if active)
-      const totalDailyAmt = (sponsorDeposit * rateBps) / 10000;
-      list.push({
-        type: "roi",
-        typeName: "Daily ROI Payout",
-        fromUser: "Contract",
-        amount: totalDailyAmt,
-        level: "-",
-        timestamp: dayTime,
-        status: "Completed",
-        txHash: `0x_roi_${d}`,
-        blockNumber: 0
+      const currentDeposit = getActiveDepositAtTime(dayTime);
+      const maxRoiCap = currentDeposit * 2.2;
+      const maxNetworkCap = currentDeposit * 4.0;
+      const sponsorMaxLimit = Math.min(maxRoiCap, maxNetworkCap);
+
+      // Add any simulated Level Income from list that occurred on this day and is after lastUpdateROI
+      list.forEach(tx => {
+        if (tx.type === "level_income" && tx.timestamp > Number(userData.lastUpdateROI) && tx.timestamp > dayStart && tx.timestamp <= dayTime) {
+          let allowedIncome = tx.amount;
+          if (sponsorCumulativeTotalEarned >= maxNetworkCap) {
+            allowedIncome = 0;
+          } else if (sponsorCumulativeTotalEarned + tx.amount > maxNetworkCap) {
+            allowedIncome = maxNetworkCap - sponsorCumulativeTotalEarned;
+          }
+          tx.amount = allowedIncome; // update simulated amount
+          sponsorCumulativeTotalEarned += allowedIncome;
+        }
       });
+
+      // Daily ROI (Includes booster if active)
+      let dailyRoiAmt = (currentDeposit * rateBps) / 10000;
+      
+      let actualDailyRoi = dailyRoiAmt;
+      if (sponsorCumulativeTotalEarned >= sponsorMaxLimit) {
+        actualDailyRoi = 0;
+      } else if (sponsorCumulativeTotalEarned + dailyRoiAmt > sponsorMaxLimit) {
+        actualDailyRoi = sponsorMaxLimit - sponsorCumulativeTotalEarned;
+      }
+      
+      sponsorCumulativeTotalEarned += actualDailyRoi;
+      
+      let displayRoi = actualDailyRoi;
+      let displayBooster = 0;
+      if (rateBps > 0) {
+        displayRoi = (actualDailyRoi * 50) / rateBps;
+        displayBooster = actualDailyRoi - displayRoi;
+      }
+      
+      if (displayRoi > 0) {
+        list.push({
+          type: "roi",
+          typeName: "Daily ROI Payout",
+          fromUser: "Contract",
+          amount: displayRoi,
+          level: "-",
+          timestamp: dayTime,
+          status: "Completed",
+          txHash: `0x_roi_${d}`,
+          blockNumber: 0
+        });
+      }
+      if (displayBooster > 0) {
+        list.push({
+          type: "booster_roi",
+          typeName: "Booster ROI Payout",
+          fromUser: "Contract",
+          amount: displayBooster,
+          level: "-",
+          timestamp: dayTime,
+          status: "Completed",
+          txHash: `0x_booster_${d}`,
+          blockNumber: 0
+        });
+      }
 
       // 2. Level ROI Matching (15% of directs' daily + booster ROI payouts)
       const qualifiedDirectsOnDay = directsData.filter(dr => dr.registrationTime <= dayTime && dr.totalDeposits >= 50).length;
-      if (sponsorDeposit >= 50 && qualifiedDirectsOnDay >= 1) {
+      if (currentDeposit >= 50 && qualifiedDirectsOnDay >= 1) {
         for (const child of directsData) {
           if (child.registrationTime > dayTime) continue;
           if (child.totalDeposits < 50) continue;
@@ -822,19 +929,41 @@ export default function Dashboard() {
             }
 
             const childRoiAmt = (child.totalDeposits * childRateBps) / 10000;
-            const levelRoiCommission = (childRoiAmt * 1500) / 10000;
+            const childMaxROI = child.totalDeposits * 2.2;
+            let actualChildRoi = childRoiAmt;
+            if (child.cumulativeTotalEarned >= childMaxROI) {
+              actualChildRoi = 0;
+            } else if (child.cumulativeTotalEarned + childRoiAmt > childMaxROI) {
+              actualChildRoi = childMaxROI - child.cumulativeTotalEarned;
+            }
             
-            list.push({
-              type: "level_roi",
-              typeName: "Level ROI Matching",
-              fromUser: child.address,
-              amount: levelRoiCommission,
-              level: 1,
-              timestamp: dayTime,
-              status: "Completed",
-              txHash: `0x_lroi_${child.address}_${d}`,
-              blockNumber: 0
-            });
+            // Accumulate child's simulated earnings
+            child.cumulativeTotalEarned += actualChildRoi;
+
+            const levelRoiCommission = (actualChildRoi * 1500) / 10000;
+            
+            // Cap Level ROI Matching commission by sponsor's own 400% Network Cap
+            let allowedCommission = levelRoiCommission;
+            if (sponsorCumulativeTotalEarned >= maxNetworkCap) {
+              allowedCommission = 0;
+            } else if (sponsorCumulativeTotalEarned + levelRoiCommission > maxNetworkCap) {
+              allowedCommission = maxNetworkCap - sponsorCumulativeTotalEarned;
+            }
+            sponsorCumulativeTotalEarned += allowedCommission;
+
+            if (allowedCommission > 0) {
+              list.push({
+                type: "level_roi",
+                typeName: "Level ROI Matching",
+                fromUser: child.address,
+                amount: allowedCommission,
+                level: 1,
+                timestamp: dayTime,
+                status: "Completed",
+                txHash: `0x_lroi_${child.address}_${d}`,
+                blockNumber: 0
+              });
+            }
           }
         }
       }
@@ -848,17 +977,32 @@ export default function Dashboard() {
       
       for (let day = 1; day <= streamDays; day++) {
         const salaryTime = streamStart + day * ONE_DAY_SECS;
-        list.push({
-          type: "perf_daily",
-          typeName: "Performance Daily Salary",
-          fromUser: "Contract",
-          amount: bonus.dailyRate,
-          level: "-",
-          timestamp: salaryTime,
-          status: "Completed",
-          txHash: `0x_salary_${bIdx}_${day}`,
-          blockNumber: 0
-        });
+        
+        // Cap by the 400% Network Cap
+        const currentDeposit = getActiveDepositAtTime(salaryTime);
+        const maxNetworkCap = currentDeposit * 4.0;
+        
+        let salaryAmt = bonus.dailyRate;
+        if (sponsorCumulativeTotalEarned >= maxNetworkCap) {
+          salaryAmt = 0;
+        } else if (sponsorCumulativeTotalEarned + bonus.dailyRate > maxNetworkCap) {
+          salaryAmt = maxNetworkCap - sponsorCumulativeTotalEarned;
+        }
+        sponsorCumulativeTotalEarned += salaryAmt;
+        
+        if (salaryAmt > 0) {
+          list.push({
+            type: "perf_daily",
+            typeName: "Performance Daily Salary",
+            fromUser: "Contract",
+            amount: salaryAmt,
+            level: "-",
+            timestamp: salaryTime,
+            status: "Completed",
+            txHash: `0x_salary_${bIdx}_${day}`,
+            blockNumber: 0
+          });
+        }
       }
     });
 
@@ -1180,14 +1324,20 @@ export default function Dashboard() {
   const simulatedLevelRoiOffset = calculateAccumulatedLevelRoi();
 
   // Initial values
-  const initialROIEarned = parseFloat(userData.dailyROIEarned) + parseFloat(userData.roiBoosterEarned);
+  const initialTotalEarned = 
+    parseFloat(userData.levelIncomeEarned) +
+    parseFloat(userData.levelROIEarned) +
+    parseFloat(userData.performanceBonusEarned) +
+    parseFloat(userData.dailyROIEarned) +
+    parseFloat(userData.roiBoosterEarned);
+
   const initialPendingROI = parseFloat(pendingBalances.pendingDaily) + parseFloat(pendingBalances.pendingBooster);
   
   // Enforce 220% ROI Cap
   const maxRoiCap = totalDepositsNum * 2.2;
   let totalPendingROI = initialPendingROI + simulatedDailyOffset + simulatedBoosterOffset;
-  if (initialROIEarned + totalPendingROI > maxRoiCap) {
-    totalPendingROI = Math.max(0, maxRoiCap - initialROIEarned);
+  if (initialTotalEarned + totalPendingROI > maxRoiCap) {
+    totalPendingROI = Math.max(0, maxRoiCap - initialTotalEarned);
   }
 
   // Split capped pending ROI back into daily & booster
@@ -1201,12 +1351,6 @@ export default function Dashboard() {
 
   // Enforce 400% Capping Limit (across all 6 streams)
   const maxNetworkCap = totalDepositsNum * 4.0;
-  const initialTotalEarned = 
-    parseFloat(userData.levelIncomeEarned) +
-    parseFloat(userData.levelROIEarned) +
-    parseFloat(userData.performanceBonusEarned) +
-    parseFloat(userData.dailyROIEarned) +
-    parseFloat(userData.roiBoosterEarned);
 
   let displayPendingLevelROI = simulatedLevelRoiOffset;
   let displayPendingPerf = parseFloat(pendingBalances.pendingPerf) + simulatedPerfOffset;
@@ -1251,7 +1395,8 @@ export default function Dashboard() {
       incomeInfoMock,
       directsList,
       oneDay,
-      treeNodes
+      treeNodes,
+      onChainEvents.filter(e => e.type === "deposit")
     );
 
     // 2. Combine with onChainEvents, filtering out simulated duplicates
@@ -1368,7 +1513,7 @@ export default function Dashboard() {
       let allowed = tx.amount;
       
       if (tx.type === "roi" || tx.type === "booster_roi") {
-        const allowedROI = Math.max(0, maxROI - runningROIEarned);
+        const allowedROI = Math.max(0, maxROI - runningTotalEarned);
         allowed = Math.min(tx.amount, allowedNetwork, allowedROI);
         runningROIEarned += allowed;
       } else {
@@ -1427,19 +1572,23 @@ export default function Dashboard() {
     let boosterROI = 0;
     let levelIncome = 0;
     let levelROI = 0;
-    let performance = 0;
+    let perfDaily = 0;
+    let perfInstant = 0;
 
     txs.forEach(tx => {
       if (tx.type === "roi") dailyROI += tx.amount;
       else if (tx.type === "booster_roi") boosterROI += tx.amount;
       else if (tx.type === "level_income") levelIncome += tx.amount;
       else if (tx.type === "level_roi") levelROI += tx.amount;
-      else if (tx.type === "perf_instant" || tx.type === "perf_daily") performance += tx.amount;
+      else if (tx.type === "perf_daily") perfDaily += tx.amount;
+      else if (tx.type === "perf_instant") perfInstant += tx.amount;
     });
 
+    const performance = perfDaily + perfInstant;
     const totalEarned = dailyROI + boosterROI + levelIncome + levelROI + performance;
+    const totalAccruedClaimable = dailyROI + boosterROI + levelROI + perfDaily;
     const totalWithdrawnVal = parseFloat(userData.totalWithdrawn) || 0;
-    const totalAvailable = Math.max(0, totalEarned - totalWithdrawnVal);
+    const totalAvailable = Math.max(0, totalAccruedClaimable - totalWithdrawnVal);
 
     return {
       dailyROI: dailyROI.toFixed(2),
@@ -1462,7 +1611,7 @@ export default function Dashboard() {
   const totalAvailableBalance = parseFloat(statsToDisplay.totalAvailable).toFixed(2);
   const totalEarnedAcrossStreams = parseFloat(statsToDisplay.totalEarned).toFixed(2);
 
-  const currentRoiEarned = parseFloat(statsToDisplay.totalROI);
+  const currentRoiEarned = parseFloat(statsToDisplay.totalEarned);
   const roiCapPercent = maxRoiCap > 0 ? Math.min((currentRoiEarned / maxRoiCap) * 100, 100) : 0;
 
   const currentNetworkEarned = parseFloat(statsToDisplay.totalEarned);
@@ -1518,6 +1667,14 @@ export default function Dashboard() {
       .filter(tx => incomeTypes.includes(tx.type))
       .reduce((sum, tx) => sum + tx.amount, 0);
   }, [filteredTxs]);
+
+  const itemsPerPage = 20;
+  const paginatedTxs = useMemo(() => {
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    return filteredTxs.slice(startIndex, startIndex + itemsPerPage);
+  }, [filteredTxs, currentPage]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredTxs.length / itemsPerPage));
 
   // Recursive Component for Tree Rendering
   function TreeNodeComponent({ addr, depth = 0 }) {
@@ -1958,10 +2115,12 @@ export default function Dashboard() {
 
               <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                 {pendingQualifications.map((qual) => {
-                  const claimDateStr = new Date(qual.claimTime * 1000).toLocaleDateString(undefined, {
+                  const claimDateStr = new Date(qual.claimTime * 1000).toLocaleString(undefined, {
                     month: 'short',
                     day: 'numeric',
-                    year: 'numeric'
+                    year: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit'
                   });
                   return (
                     <div key={qual.tierIndex} style={{
@@ -2081,7 +2240,7 @@ export default function Dashboard() {
                 <div className="progress-fill roi-fill" style={{ width: `${roiCapPercent}%`, height: "100%", transition: "width 0.3s ease" }}></div>
               </div>
               <div style={{ display: "flex", justifyContent: "space-between", marginTop: "8px", fontSize: "11px", color: "var(--text-muted)" }}>
-                <span>Includes Daily ROI & Booster ROI</span>
+                <span>Includes all Yields, Commissions & Bonuses (Solidity cap)</span>
                 <span>{roiCapPercent.toFixed(1)}% Reached</span>
               </div>
             </div>
@@ -2566,7 +2725,7 @@ export default function Dashboard() {
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredTxs.map((tx, idx) => {
+                    {paginatedTxs.map((tx, idx) => {
                       const dateStr = new Date(tx.timestamp * 1000).toLocaleString(undefined, {
                         year: 'numeric',
                         month: 'short',
@@ -2578,7 +2737,7 @@ export default function Dashboard() {
                       
                       return (
                         <tr key={idx} style={{ borderBottom: "1px solid var(--border)" }}>
-                          <td style={{ padding: "12px 10px", fontSize: "13px" }} className="mono">{idx + 1}</td>
+                          <td style={{ padding: "12px 10px", fontSize: "13px" }} className="mono">{(currentPage - 1) * itemsPerPage + idx + 1}</td>
                           <td style={{ padding: "12px 10px", fontSize: "13px" }}>
                             <span className={
                               tx.type === "deposit" ? "tag roi" :
@@ -2625,6 +2784,90 @@ export default function Dashboard() {
                 </table>
               )}
             </div>
+            
+            {/* Pagination Controls */}
+            {filteredTxs.length > 0 && (
+              <div style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginTop: "20px",
+                flexWrap: "wrap",
+                gap: "15px",
+                paddingTop: "15px",
+                borderTop: "1px solid var(--border)"
+              }}>
+                <div style={{ fontSize: "13px", color: "var(--text-muted)" }}>
+                  Showing {Math.min(filteredTxs.length, (currentPage - 1) * itemsPerPage + 1)}–{Math.min(filteredTxs.length, currentPage * itemsPerPage)} of {filteredTxs.length} entries
+                </div>
+                <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                  <button
+                    onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                    disabled={currentPage === 1}
+                    className="btn secondary-btn"
+                    style={{
+                      padding: "6px 12px",
+                      fontSize: "12px",
+                      border: "1px solid var(--border)",
+                      cursor: currentPage === 1 ? "not-allowed" : "pointer",
+                      opacity: currentPage === 1 ? 0.5 : 1,
+                      transition: "all 0.2s"
+                    }}
+                  >
+                    Previous
+                  </button>
+                  
+                  {/* Page numbers */}
+                  {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                    let pageNum = 1;
+                    if (totalPages <= 5) {
+                      pageNum = i + 1;
+                    } else {
+                      if (currentPage <= 3) pageNum = i + 1;
+                      else if (currentPage >= totalPages - 2) pageNum = totalPages - 4 + i;
+                      else pageNum = currentPage - 2 + i;
+                    }
+
+                    return (
+                      <button
+                        key={pageNum}
+                        onClick={() => setCurrentPage(pageNum)}
+                        style={{
+                          width: "32px",
+                          height: "32px",
+                          borderRadius: "6px",
+                          border: pageNum === currentPage ? "1px solid var(--blue-bright)" : "1px solid var(--border)",
+                          background: pageNum === currentPage ? "rgba(94, 200, 242, 0.1)" : "transparent",
+                          color: pageNum === currentPage ? "var(--blue-bright)" : "#fff",
+                          cursor: "pointer",
+                          fontSize: "12px",
+                          fontWeight: pageNum === currentPage ? "600" : "normal",
+                          transition: "all 0.2s"
+                        }}
+                      >
+                        {pageNum}
+                      </button>
+                    );
+                  })}
+
+                  <button
+                    onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                    disabled={currentPage === totalPages}
+                    className="btn secondary-btn"
+                    style={{
+                      padding: "6px 12px",
+                      fontSize: "12px",
+                      border: "1px solid var(--border)",
+                      cursor: currentPage === totalPages ? "not-allowed" : "pointer",
+                      opacity: currentPage === totalPages ? 0.5 : 1,
+                      transition: "all 0.2s"
+                    }}
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
@@ -2687,7 +2930,7 @@ export default function Dashboard() {
                   Minimum deposit is 10 USDT. A package activation requires a one-time USDT approval signature.
                   {isRegistered && (
                     <div style={{ marginTop: "8px", color: "var(--blue-bright)" }}>
-                      Your current active package is <strong>{userData.totalDeposits} USDT</strong>. To upgrade/top-up, the new deposit amount must be greater than or equal to your current deposit value.
+                      Your current active package is <strong>{userData.totalDeposits} USDT</strong>. To upgrade/top-up, the new deposit amount must be greater than or equal to your last deposit amount of <strong>{lastDepositAmount} USDT</strong>.
                     </div>
                   )}
                 </div>
@@ -2788,72 +3031,6 @@ export default function Dashboard() {
             </div>
           </div>
 
-          <div className="card" style={{ marginBottom: "20px" }}>
-            <div className="section-title" style={{ marginTop: 0 }}>System Configuration</div>
-            <p style={{ color: "var(--text-muted)", fontSize: "13px", lineHeight: "1.6", marginBottom: "15px" }}>
-              Configure smart contract addresses, target blockchain network, and custom event indexing start block.
-            </p>
-            <div className="withdraw-card" style={{ gridTemplateColumns: "1fr" }}>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", marginBottom: "16px" }}>
-                <div className="field" style={{ marginBottom: 0 }}>
-                  <label>DT Infinity Contract Address</label>
-                  <input 
-                    type="text" 
-                    value={dtInfinityAddress} 
-                    onChange={(e) => setDtInfinityAddress(e.target.value)}
-                    placeholder="0x..."
-                  />
-                </div>
-                <div className="field" style={{ marginBottom: 0 }}>
-                  <label>USDT Token Contract Address</label>
-                  <input 
-                    type="text" 
-                    value={usdtAddress} 
-                    onChange={(e) => setUsdtAddress(e.target.value)}
-                    placeholder="0x..."
-                  />
-                </div>
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", marginBottom: "16px" }}>
-                <div className="field" style={{ marginBottom: 0 }}>
-                  <label>Target Chain ID</label>
-                  <input 
-                    type="number" 
-                    value={targetChainId.toString()} 
-                    onChange={(e) => setTargetChainId(BigInt(e.target.value || "0"))}
-                    placeholder="e.g. 97"
-                  />
-                </div>
-                <div className="field" style={{ marginBottom: 0 }}>
-                  <label>Contract Deployment Block (Start Block)</label>
-                  <input 
-                    type="number" 
-                    value={deploymentBlock} 
-                    onChange={(e) => setDeploymentBlock(e.target.value)}
-                    placeholder="e.g. 42900000"
-                  />
-                </div>
-              </div>
-              <div style={{ display: "flex", gap: "12px", marginTop: "10px" }}>
-                <button 
-                  onClick={handleSaveConfig} 
-                  className="withdraw-btn" 
-                  style={{ width: "auto", padding: "12px 24px", marginTop: 0 }}
-                  disabled={loading}
-                >
-                  Save Configuration
-                </button>
-                <button 
-                  onClick={handleResetCache} 
-                  className="withdraw-btn" 
-                  style={{ width: "auto", padding: "12px 24px", marginTop: 0, background: "transparent", border: "1px solid var(--border)", color: "var(--text-muted)" }}
-                  disabled={loading}
-                >
-                  Clear Transaction Cache
-                </button>
-              </div>
-            </div>
-          </div>
 
           <div className="card" style={{ marginBottom: "20px" }}>
             <div className="section-title" style={{ marginTop: 0 }}>Performance Bonus Tiers</div>
