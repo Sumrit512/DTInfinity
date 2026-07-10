@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import { ethers } from "ethers";
 
 // Default contract addresses (placeholders that user can update in settings)
-const DEFAULT_DT_INFINITY_ADDRESS = "0x32116f10442966206C64279105c6D783743fB186";
+const DEFAULT_DT_INFINITY_ADDRESS = "0xe1c223D8A3d694E67A1a0514010b11722F41CB00";
 const DEFAULT_USDT_ADDRESS = "0x0aB8c2DfE9aD2e2D3f58E6006884cda5e6f1E7B9";
 
 // Simple USDT ABI
@@ -62,6 +62,22 @@ const PERFORMANCE_TIERS = [
   { target: 25000, instant: 2250, daily: 150 },
   { target: 50000, instant: 7500, daily: 500 }
 ];
+
+const formatCountdown = (secs) => {
+  if (secs <= 0) return "00:00:00";
+  const days = Math.floor(secs / 86400);
+  const hours = Math.floor((secs % 86400) / 3600);
+  const minutes = Math.floor((secs % 3600) / 60);
+  const seconds = secs % 60;
+
+  const pad = (num) => String(num).padStart(2, '0');
+
+  if (days > 0) {
+    return `${days}d ${pad(hours)}h ${pad(minutes)}m ${pad(seconds)}s`;
+  }
+  return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
+};
+
 
 export default function Dashboard() {
   const [activeView, setActiveView] = useState("dashboard");
@@ -188,6 +204,7 @@ export default function Dashboard() {
         savedDT.toLowerCase() === "0xa374e919738dc198213a497937f396d275e348f7" || 
         savedDT.toLowerCase() === "0x4ee2e6e9306bd8f5b6e111062aae9c259f7b4df3" ||
         savedDT.toLowerCase() === "0xa2306ed14dc4e1f0c876260621e7dba5a7797eff" ||
+        savedDT.toLowerCase() === "0x32116f10442966206c64279105c6d783743fb186" ||
         savedDT.toLowerCase() === "0xcc86d7ee69e984820f2de666a36b8025be23e459"
       )) {
         localStorage.removeItem("DT_INFINITY_ADDRESS");
@@ -852,7 +869,7 @@ export default function Dashboard() {
               const currentSponsorDeposit = getActiveDepositAtTime(childNode.registrationTime);
               const qualifiedDirectsAtTime = directsData.filter(dr => dr.registrationTime <= childNode.registrationTime && dr.totalDeposits >= 50).length;
 
-              if (depositVal >= 50 && currentSponsorDeposit >= 50 && qualifiedDirectsAtTime >= curr.level + 1) {
+              if (depositVal >= 10 && currentSponsorDeposit >= 10 && qualifiedDirectsAtTime >= curr.level + 1) {
                 const pct = levelIncomePercentages[curr.level]; // Level 1 is index 0
                 const amount = (depositVal * pct) / 10000;
                 if (amount > 0) {
@@ -865,7 +882,8 @@ export default function Dashboard() {
                     timestamp: childNode.registrationTime,
                     status: "Completed",
                     txHash: `0x_linc_${childAddr.toLowerCase()}_${curr.level + 1}`,
-                    blockNumber: 0
+                    blockNumber: 0,
+                    isSimulated: true
                   });
                 }
               }
@@ -959,7 +977,8 @@ export default function Dashboard() {
           timestamp: dayTime,
           status: "Completed",
           txHash: `0x_roi_${d}`,
-          blockNumber: 0
+          blockNumber: 0,
+          isSimulated: true
         });
       }
 
@@ -1089,7 +1108,8 @@ export default function Dashboard() {
               timestamp: matchTime,
               status: "Completed",
               txHash: `0x_lroi_${child.address.toLowerCase()}_${k}`,
-              blockNumber: 0
+              blockNumber: 0,
+              isSimulated: true
             });
           }
         }
@@ -1127,7 +1147,9 @@ export default function Dashboard() {
             timestamp: salaryTime,
             status: "Completed",
             txHash: `0x_salary_${bIdx}_${day}`,
-            blockNumber: 0
+            blockNumber: 0,
+            isSimulated: true,
+            tierIndex: bonus.tierIndex
           });
         }
       }
@@ -1617,7 +1639,7 @@ export default function Dashboard() {
     let simulatedPerfDailyClaimedSum = 0;
     combinedTxs.forEach(t => {
       if (t.type === "perf_daily") {
-        const activeBonus = activeBonuses.find(b => t.timestamp >= b.startTime && t.timestamp <= b.endTime);
+        const activeBonus = activeBonuses.find(b => b.tierIndex === t.tierIndex);
         if (activeBonus) {
           if (t.timestamp <= activeBonus.lastClaimTime) {
             simulatedPerfDailyClaimedSum += t.amount;
@@ -1673,6 +1695,15 @@ export default function Dashboard() {
       
       const allowedNetwork = Math.max(0, maxNetwork - runningTotalEarned);
       let allowed = tx.amount;
+      
+      if (!tx.isSimulated) {
+        // Hard on-chain or fallback transaction: Do not modify amount, but still accumulate to running totals
+        if (tx.type === "roi" || tx.type === "booster_roi") {
+          runningROIEarned += allowed;
+        }
+        runningTotalEarned += allowed;
+        return tx;
+      }
       
       if (tx.type === "roi" || tx.type === "booster_roi") {
         const allowedROI = Math.max(0, maxROI - runningTotalEarned);
@@ -1751,6 +1782,18 @@ export default function Dashboard() {
     const totalAccruedClaimable = dailyROI + boosterROI + levelROI + perfDaily;
     const totalWithdrawnVal = parseFloat(userData.totalWithdrawn) || 0;
     const totalAvailable = Math.max(0, totalAccruedClaimable - totalWithdrawnVal);
+
+    console.log("STATS_DEBUG:", {
+      txsLength: txs.length,
+      perfDaily,
+      perfInstant,
+      performance,
+      dailyROI,
+      levelIncome,
+      levelROI,
+      userDataPerf: userData.performanceBonusEarned,
+      userDataROI: userData.dailyROIEarned
+    });
 
     return {
       dailyROI: dailyROI.toFixed(2),
@@ -2284,6 +2327,11 @@ export default function Dashboard() {
                     hour: '2-digit',
                     minute: '2-digit'
                   });
+                  const nowUnix = Math.floor(Date.now() / 1000);
+                  const endClaimTime = qual.claimTime + Number(perfOneDay || 86400n);
+                  const timeLeft = Math.max(0, endClaimTime - nowUnix);
+                  const timeUntilActivation = Math.max(0, qual.claimTime - nowUnix);
+
                   return (
                     <div key={qual.tierIndex} style={{
                       background: "var(--surface-2)",
@@ -2305,45 +2353,59 @@ export default function Dashboard() {
                       </div>
 
                       {qual.isClaimWindowActive ? (
-                        <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
-                          <button
-                            onClick={() => handleClaimPerformance(qual.tierIndex, true)}
-                            className="btn primary-btn"
-                            disabled={loading}
-                            style={{
-                              padding: "8px 16px",
-                              fontSize: "12px",
-                              flex: 1,
-                              minWidth: "140px",
-                              background: "linear-gradient(135deg, var(--blue-bright) 0%, #1e40af 100%)",
-                              cursor: "pointer"
-                            }}
-                          >
-                            Option 1: Instant Payout ({qual.instant} USDT)
-                          </button>
-                          <button
-                            onClick={() => handleClaimPerformance(qual.tierIndex, false)}
-                            className="btn secondary-btn"
-                            disabled={loading}
-                            style={{
-                              padding: "8px 16px",
-                              fontSize: "12px",
-                              flex: 1,
-                              minWidth: "140px",
-                              border: "1px solid var(--border)",
-                              cursor: "pointer"
-                            }}
-                          >
-                            Option 2: Daily Stream ({qual.daily} USDT/day for 30d)
-                          </button>
+                        <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                          <div style={{ fontSize: "12px", color: "var(--up)", display: "flex", alignItems: "center", gap: "6px", fontWeight: "600" }}>
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ width: "16px", height: "16px" }}>
+                              <circle cx="12" cy="12" r="10"/>
+                              <path d="M12 6v6l4 2"/>
+                            </svg>
+                            Claim Window Closes In: <span className="mono" style={{ color: "#fff", background: "rgba(16, 185, 129, 0.15)", padding: "2px 6px", borderRadius: "4px" }}>{formatCountdown(timeLeft)}</span>
+                          </div>
+                          <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+                            <button
+                              onClick={() => handleClaimPerformance(qual.tierIndex, true)}
+                              className="btn primary-btn"
+                              disabled={loading}
+                              style={{
+                                padding: "8px 16px",
+                                fontSize: "12px",
+                                flex: 1,
+                                minWidth: "140px",
+                                background: "linear-gradient(135deg, var(--blue-bright) 0%, #1e40af 100%)",
+                                cursor: "pointer"
+                              }}
+                            >
+                              Option 1: Instant Payout ({qual.instant} USDT)
+                            </button>
+                            <button
+                              onClick={() => handleClaimPerformance(qual.tierIndex, false)}
+                              className="btn secondary-btn"
+                              disabled={loading}
+                              style={{
+                                padding: "8px 16px",
+                                fontSize: "12px",
+                                flex: 1,
+                                minWidth: "140px",
+                                border: "1px solid var(--border)",
+                                cursor: "pointer"
+                              }}
+                            >
+                              Option 2: Daily Stream ({qual.daily} USDT/day for 30d)
+                            </button>
+                          </div>
                         </div>
                       ) : (
-                        <div style={{ fontSize: "12px", color: "var(--orange)", display: "flex", alignItems: "center", gap: "5px" }}>
-                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: "16px", height: "16px" }}>
-                            <circle cx="12" cy="12" r="10"/>
-                            <path d="M12 6v6l4 2"/>
-                          </svg>
-                          Claim window will activate on {claimDateStr} for 24 hours only.
+                        <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                          <div style={{ fontSize: "12.5px", color: "var(--orange)", display: "flex", alignItems: "center", gap: "5px", fontWeight: "600" }}>
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: "16px", height: "16px" }}>
+                              <circle cx="12" cy="12" r="10"/>
+                              <path d="M12 6v6l4 2"/>
+                            </svg>
+                            Claim window will activate on {claimDateStr} for 24 hours only.
+                          </div>
+                          <div style={{ fontSize: "12px", color: "var(--text-muted)", paddingLeft: "21px" }}>
+                            Activates In: <span className="mono" style={{ color: "#fff", background: "rgba(249, 115, 22, 0.15)", padding: "2px 6px", borderRadius: "4px", fontWeight: "600" }}>{formatCountdown(timeUntilActivation)}</span>
+                          </div>
                         </div>
                       )}
                     </div>
@@ -2477,6 +2539,58 @@ export default function Dashboard() {
               <div className="rate">Leg volume match</div>
             </div>
           </div>
+
+          {activeBonuses.length > 0 && (
+            <div style={{ marginTop: "20px", marginBottom: "20px" }}>
+              <div className="section-title" style={{ fontSize: "14px", color: "var(--text-muted)", marginBottom: "10px", textTransform: "uppercase", letterSpacing: "0.5px" }}>Active Daily Salary Streams (Performance Bonus)</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                {activeBonuses.map((bonus, bIdx) => {
+                  const nowUnix = Math.floor(Date.now() / 1000);
+                  const timeLeftStream = Math.max(0, bonus.endTime - nowUnix);
+                  const isExpired = timeLeftStream === 0;
+                  
+                  return (
+                    <div key={bIdx} className="card" style={{
+                      background: "rgba(94, 200, 242, 0.03)",
+                      border: "1px solid var(--border)",
+                      borderRadius: "10px",
+                      padding: "15px",
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center"
+                    }}>
+                      <div>
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                          <span style={{ fontWeight: "600", fontSize: "13.5px", color: "#fff" }}>
+                            Daily Stream #{bIdx + 1} (Tier {bonus.tierIndex + 1})
+                          </span>
+                          <span style={{
+                            fontSize: "10px",
+                            background: isExpired ? "rgba(242, 112, 94, 0.15)" : "rgba(94, 200, 242, 0.15)",
+                            color: isExpired ? "var(--down)" : "var(--blue-bright)",
+                            padding: "2px 8px",
+                            borderRadius: "4px",
+                            fontWeight: "600"
+                          }}>
+                            {isExpired ? "Expired" : "Active"}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: "11.5px", color: "var(--text-muted)", marginTop: "4px" }}>
+                          Rate: <span className="mono" style={{ color: "var(--up)", fontWeight: "600" }}>+{bonus.dailyRate} USDT/day</span>
+                        </div>
+                      </div>
+                      
+                      {!isExpired && (
+                        <div className="mono" style={{ textAlign: "right", fontSize: "12px", color: "var(--text-muted)" }}>
+                          Time Left: <span style={{ color: "#fff", background: "rgba(255,255,255,0.06)", padding: "4px 8px", borderRadius: "4px", fontWeight: "600" }}>{formatCountdown(timeLeftStream)}</span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           <div className="two-col">
             <div className="card team-card">
