@@ -205,7 +205,7 @@ export default function Dashboard() {
         savedDT.toLowerCase() === "0x4ee2e6e9306bd8f5b6e111062aae9c259f7b4df3" ||
         savedDT.toLowerCase() === "0xa2306ed14dc4e1f0c876260621e7dba5a7797eff" ||
         savedDT.toLowerCase() === "0x32116f10442966206c64279105c6d783743fb186" ||
-        savedDT.toLowerCase() === "0xcc86d7ee69e984820f2de666a36b8025be23e459"
+        savedDT.toLowerCase() === "0xe1c223d8a3d694e67a1a0514010b11722f41cb00"
       )) {
         localStorage.removeItem("DT_INFINITY_ADDRESS");
         savedDT = null;
@@ -557,16 +557,21 @@ export default function Dashboard() {
         setDirectsList(directs);
 
         let loadedDirectsMap = {};
-        // Auto-load all downline referrals recursively up to 5 levels for complete Level Income simulation
+        // Auto-load all downline referrals recursively up to 20 levels for complete Level Income & ROI simulation
         if (directs && directs.length > 0) {
           try {
-            let totalLoadedNodes = 0;
             const loadTreeRecursively = async (addresses, currentLevel) => {
-              if (currentLevel >= 5 || !addresses || addresses.length === 0 || totalLoadedNodes >= 100) return;
-              const chunk = addresses.slice(0, 100 - totalLoadedNodes);
-              totalLoadedNodes += chunk.length;
+              if (currentLevel >= 20 || !addresses || addresses.length === 0) return;
               
-              const results = await Promise.all(chunk.map(childAddr => loadTreeNode(childAddr, dtContract)));
+              // Query in parallel chunks of 30 to avoid RPC rate limits
+              const chunkSize = 30;
+              const results = [];
+              for (let i = 0; i < addresses.length; i += chunkSize) {
+                const chunk = addresses.slice(i, i + chunkSize);
+                const chunkResults = await Promise.all(chunk.map(childAddr => loadTreeNode(childAddr, dtContract)));
+                results.push(...chunkResults);
+              }
+              
               const nextLevelAddresses = [];
               results.forEach(res => {
                 if (res) {
@@ -578,7 +583,7 @@ export default function Dashboard() {
               });
               await loadTreeRecursively(nextLevelAddresses, currentLevel + 1);
             };
-            loadTreeRecursively(directs, 1);
+            await loadTreeRecursively(directs, 1);
           } catch (e) {
             console.warn("Failed to recursively auto-load downline referrals", e);
           }
@@ -699,47 +704,60 @@ export default function Dashboard() {
         // Fetch PerformanceBonusClaimed events using robust public RPC endpoints loop
         let perfClaims = [];
         const rpcUrls = [
-          "https://bsc-testnet.publicnode.com",
           "https://data-seed-prebsc-1-s1.binance.org:8545",
-          "https://data-seed-prebsc-2-s1.binance.org:8545"
+          "https://data-seed-prebsc-2-s1.binance.org:8545",
+          "https://data-seed-prebsc-1-s2.binance.org:8545"
         ];
         
         for (const url of rpcUrls) {
           try {
-            const publicProvider = new ethers.JsonRpcProvider(url);
+            const publicProvider = new ethers.JsonRpcProvider(url, 97, { staticNetwork: true });
             const latestBlock = Number(await publicProvider.getBlockNumber());
             let fromBlockVal = deploymentBlock ? (isNaN(Number(deploymentBlock)) ? 0 : Number(deploymentBlock)) : 0;
-            if (fromBlockVal === 0 || (latestBlock - fromBlockVal) > 49000) {
-              fromBlockVal = Math.max(0, latestBlock - 49000);
+            
+            // Limit search range to prevent browser freezing if block is 0 or too far back
+            if (fromBlockVal === 0) {
+              fromBlockVal = Math.max(0, latestBlock - 50000);
+            } else if ((latestBlock - fromBlockVal) > 200000) {
+              fromBlockVal = Math.max(0, latestBlock - 200000);
             }
+            
             const dtContractPublic = new ethers.Contract(dtInfinityAddress, DT_INFINITY_ABI, publicProvider);
             const filter = await dtContractPublic.filters.PerformanceBonusClaimed(addr);
-            const events = await dtContractPublic.queryFilter(filter, fromBlockVal);
             
-            if (events) {
-              perfClaims = events.map((event, idx) => {
-                const args = event.args;
-                const tierIdx = Number(args.tierIndex);
-                const chooseInstant = args.chooseInstant;
-                const time = Number(args.time);
-                const tier = PERFORMANCE_TIERS[tierIdx];
-                
-                return {
-                  type: chooseInstant ? "perf_instant" : "perf_claim",
-                  typeName: chooseInstant ? "Performance Bonus (Instant)" : "Performance Bonus Claimed",
-                  fromUser: "Contract",
-                  amount: chooseInstant ? tier.instant : 0,
-                  level: "-",
-                  timestamp: time,
-                  status: "Completed",
-                  txHash: event.transactionHash || `0x_perf_claim_${addr}_${idx}`,
-                  blockNumber: Number(event.blockNumber || 0)
-                };
-              });
-              break; // successfully queried events, break loop
+            let allEvents = [];
+            let currentBlock = fromBlockVal;
+            while (currentBlock <= latestBlock) {
+              let toBlock = Math.min(currentBlock + 950, latestBlock);
+              const eventsChunk = await dtContractPublic.queryFilter(filter, currentBlock, toBlock);
+              if (eventsChunk) {
+                allEvents = allEvents.concat(eventsChunk);
+              }
+              currentBlock = toBlock + 1;
             }
+            
+            perfClaims = allEvents.map((event, idx) => {
+              const args = event.args;
+              const tierIdx = Number(args.tierIndex);
+              const chooseInstant = args.chooseInstant;
+              const time = Number(args.time);
+              const tier = PERFORMANCE_TIERS[tierIdx];
+              
+              return {
+                type: chooseInstant ? "perf_instant" : "perf_claim",
+                typeName: chooseInstant ? "Performance Bonus (Instant)" : "Performance Bonus Claimed",
+                fromUser: "Contract",
+                amount: chooseInstant ? tier.instant : 0,
+                level: "-",
+                timestamp: time,
+                status: "Completed",
+                txHash: event.transactionHash || `0x_perf_claim_${addr}_${idx}`,
+                blockNumber: Number(event.blockNumber || 0)
+              };
+            });
+            break; // successfully queried events, break loop
           } catch (err) {
-            console.warn(`Query logs failed on RPC ${url}, trying next...`);
+            console.warn(`Query logs failed on RPC ${url}, trying next...`, err);
           }
         }
 
@@ -1649,8 +1667,27 @@ export default function Dashboard() {
     });
 
     const totalPerfClaimedOnChain = parseFloat(userData.performanceBonusEarned || 0);
-    const perfInstantDiff = totalPerfClaimedOnChain - (simulatedPerfDailyClaimedSum + foundPerfInstantSum);
+    let perfInstantDiff = totalPerfClaimedOnChain - (simulatedPerfDailyClaimedSum + foundPerfInstantSum);
     if (perfInstantDiff > 0.01) {
+      // If log fetching failed (foundPerfInstantSum is 0) and we have a positive difference,
+      // it might have been capped on-chain. We map it to the expected tier instant payout
+      // to match what the event would have displayed.
+      if (foundPerfInstantSum === 0) {
+        if (perfInstantDiff > 0.01 && perfInstantDiff <= 75) {
+          perfInstantDiff = 75;
+        } else if (perfInstantDiff > 75 && perfInstantDiff <= 150) {
+          perfInstantDiff = 150;
+        } else if (perfInstantDiff > 150 && perfInstantDiff <= 375) {
+          perfInstantDiff = 375;
+        } else if (perfInstantDiff > 375 && perfInstantDiff <= 750) {
+          perfInstantDiff = 750;
+        } else if (perfInstantDiff > 750 && perfInstantDiff <= 1500) {
+          perfInstantDiff = 1500;
+        } else if (perfInstantDiff > 1500 && perfInstantDiff <= 3750) {
+          perfInstantDiff = 3750;
+        }
+      }
+      
       combinedTxs.push({
         type: "perf_instant",
         typeName: "Performance Bonus (Instant)",
