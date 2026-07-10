@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import { ethers } from "ethers";
 
 // Default contract addresses (placeholders that user can update in settings)
-const DEFAULT_DT_INFINITY_ADDRESS = "0xcC86D7ee69e984820F2De666a36B8025BE23E459";
+const DEFAULT_DT_INFINITY_ADDRESS = "0x32116f10442966206C64279105c6D783743fB186";
 const DEFAULT_USDT_ADDRESS = "0x0aB8c2DfE9aD2e2D3f58E6006884cda5e6f1E7B9";
 
 // Simple USDT ABI
@@ -188,7 +188,7 @@ export default function Dashboard() {
         savedDT.toLowerCase() === "0xa374e919738dc198213a497937f396d275e348f7" || 
         savedDT.toLowerCase() === "0x4ee2e6e9306bd8f5b6e111062aae9c259f7b4df3" ||
         savedDT.toLowerCase() === "0xa2306ed14dc4e1f0c876260621e7dba5a7797eff" ||
-        savedDT.toLowerCase() === "0x32116f10442966206c64279105c6d783743fb186"
+        savedDT.toLowerCase() === "0xcc86d7ee69e984820f2de666a36b8025be23e459"
       )) {
         localStorage.removeItem("DT_INFINITY_ADDRESS");
         savedDT = null;
