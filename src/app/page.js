@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import { ethers } from "ethers";
 
 // Default contract addresses (placeholders that user can update in settings)
-const DEFAULT_DT_INFINITY_ADDRESS = "0x32116f10442966206C64279105c6D783743fB186";
+const DEFAULT_DT_INFINITY_ADDRESS = "0xcC86D7ee69e984820F2De666a36B8025BE23E459";
 const DEFAULT_USDT_ADDRESS = "0x0aB8c2DfE9aD2e2D3f58E6006884cda5e6f1E7B9";
 
 // Simple USDT ABI
@@ -187,7 +187,8 @@ export default function Dashboard() {
       if (savedDT && (
         savedDT.toLowerCase() === "0xa374e919738dc198213a497937f396d275e348f7" || 
         savedDT.toLowerCase() === "0x4ee2e6e9306bd8f5b6e111062aae9c259f7b4df3" ||
-        savedDT.toLowerCase() === "0xa2306ed14dc4e1f0c876260621e7dba5a7797eff"
+        savedDT.toLowerCase() === "0xa2306ed14dc4e1f0c876260621e7dba5a7797eff" ||
+        savedDT.toLowerCase() === "0x32116f10442966206c64279105c6d783743fb186"
       )) {
         localStorage.removeItem("DT_INFINITY_ADDRESS");
         savedDT = null;
@@ -964,13 +965,53 @@ export default function Dashboard() {
 
     }
 
-    // 2. Level ROI Matching (15% of directs' daily + booster ROI payouts)
-    // Simulated chronologically based on each direct downline's own yield payouts
-    directsData.forEach(child => {
+    // 2. Level ROI Matching (up to 20 generations)
+    // Traverses downline tree up to 20 levels to gather all downlines and simulate their Level ROI Matching payouts
+    const levelROIPercentages = [
+      1500, 1000, 500, 500, 500, 400, 400, 400, 400, 400,
+      300, 300, 300, 300, 300, 200, 200, 200, 200, 200
+    ];
+    const downlinesForROI = [];
+    const roiQueue = [{ address: addr, level: 0 }];
+    const roiVisited = new Set([addr.toLowerCase()]);
+    
+    let roiHead = 0;
+    while (roiHead < roiQueue.length) {
+      const curr = roiQueue[roiHead++];
+      if (curr.level >= 20) continue;
+      
+      const currNode = curr.address.toLowerCase() === addr.toLowerCase()
+        ? { children: directs || directsList }
+        : (loadedDirectsMap[curr.address.toLowerCase()] || treeNodes[curr.address.toLowerCase()]);
+        
+      if (currNode && currNode.children) {
+        currNode.children.forEach(childAddr => {
+          const childKey = childAddr.toLowerCase();
+          if (!roiVisited.has(childKey)) {
+            roiVisited.add(childKey);
+            const childNode = loadedDirectsMap[childKey] || treeNodes[childKey];
+            if (childNode) {
+              downlinesForROI.push({
+                address: childAddr,
+                level: curr.level + 1,
+                registrationTime: Number(childNode.registrationTime || 0),
+                totalDeposits: parseFloat(childNode.totalDeposits || 0),
+                node: childNode
+              });
+              roiQueue.push({ address: childAddr, level: curr.level + 1 });
+            }
+          }
+        });
+      }
+    }
+
+    downlinesForROI.forEach(child => {
       if (child.totalDeposits < 50) return;
 
       const numChildDays = Math.floor((now - child.registrationTime) / ONE_DAY_SECS);
-      const childNode = loadedDirectsMap[child.address.toLowerCase()] || treeNodes[child.address.toLowerCase()];
+      if (numChildDays <= 0) return;
+
+      const childNode = child.node;
       
       let childNonRoi = 0;
       if (childNode) {
@@ -991,8 +1032,8 @@ export default function Dashboard() {
             const gcNode = loadedDirectsMap[gcAddr.toLowerCase()] || treeNodes[gcAddr.toLowerCase()];
             if (gcNode) {
               childDirectsData.push({
-                registrationTime: gcNode.registrationTime,
-                totalDeposits: parseFloat(gcNode.totalDeposits)
+                registrationTime: Number(gcNode.registrationTime || 0),
+                totalDeposits: parseFloat(gcNode.totalDeposits || 0)
               });
             }
           });
@@ -1034,20 +1075,23 @@ export default function Dashboard() {
         const sponsorDeposit = getActiveDepositAtTime(matchTime);
         const qualifiedDirectsOnDay = directsData.filter(dr => dr.registrationTime <= matchTime && dr.totalDeposits >= 50).length;
 
-        if (sponsorDeposit >= 50 && qualifiedDirectsOnDay >= 1 && actualChildRoi > 0) {
-          const levelRoiCommission = (actualChildRoi * 1500) / 10000;
+        if (sponsorDeposit >= 50 && qualifiedDirectsOnDay >= child.level && actualChildRoi > 0) {
+          const levelRoiPct = levelROIPercentages[child.level - 1] || 0;
+          const levelRoiCommission = (actualChildRoi * levelRoiPct) / 10000;
           
-          list.push({
-            type: "level_roi",
-            typeName: "Level ROI Matching",
-            fromUser: child.address,
-            amount: levelRoiCommission,
-            level: 1,
-            timestamp: matchTime,
-            status: "Completed",
-            txHash: `0x_lroi_${child.address.toLowerCase()}_${k}`,
-            blockNumber: 0
-          });
+          if (levelRoiCommission > 0) {
+            list.push({
+              type: "level_roi",
+              typeName: "Level ROI Matching",
+              fromUser: child.address,
+              amount: levelRoiCommission,
+              level: child.level,
+              timestamp: matchTime,
+              status: "Completed",
+              txHash: `0x_lroi_${child.address.toLowerCase()}_${k}`,
+              blockNumber: 0
+            });
+          }
         }
       }
     });
