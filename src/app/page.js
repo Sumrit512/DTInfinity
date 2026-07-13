@@ -6,7 +6,7 @@ import { useQuery, useMutation, useAction } from "convex/react";
 import { api } from "../../convex/_generated/api.js";
 
 // Default contract addresses (placeholders that user can update in settings)
-const DEFAULT_DT_INFINITY_ADDRESS = "0xE6b6AFc8603088A2F949e9c4D11C1050644C01c3";
+const DEFAULT_DT_INFINITY_ADDRESS = "0x243503d92dfb19c37bca3bdc8987d0825e64ac97";
 const DEFAULT_USDT_ADDRESS = "0x0aB8c2DfE9aD2e2D3f58E6006884cda5e6f1E7B9";
 
 // Simple USDT ABI
