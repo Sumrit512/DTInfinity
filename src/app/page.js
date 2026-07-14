@@ -6,7 +6,7 @@ import { useQuery, useMutation, useAction } from "convex/react";
 import { api } from "../../convex/_generated/api.js";
 
 // Default contract addresses (placeholders that user can update in settings)
-const DEFAULT_DT_INFINITY_ADDRESS = "0x243503d92dfb19c37bca3bdc8987d0825e64ac97";
+const DEFAULT_DT_INFINITY_ADDRESS = "0xE6b6AFc8603088A2F949e9c4D11C1050644C01c3";
 const DEFAULT_USDT_ADDRESS = "0x0aB8c2DfE9aD2e2D3f58E6006884cda5e6f1E7B9";
 
 // Simple USDT ABI
@@ -1162,6 +1162,95 @@ export default function Dashboard() {
       return 50;
     }
 
+    // Fallback Level Income
+    const totalLevelIncOnChain = incomeInfo ? safeFloat(ethers.formatUnits(incomeInfo.levelIncomeEarned, 18)) : 0;
+    const simulatedLevelIncSum = list.filter(t => t.type === "level_income").reduce((s, t) => s + t.amount, 0);
+    const levelIncDiff = totalLevelIncOnChain - simulatedLevelIncSum;
+    if (levelIncDiff > 0.01) {
+      list.push({
+        type: "level_income",
+        typeName: "Level Income",
+        fromUser: "Deeper Downline",
+        amount: levelIncDiff,
+        level: ">1",
+        timestamp: sponsorJoin + 1800,
+        status: "Completed",
+        txHash: "0x_fallback_level_inc",
+        blockNumber: 0
+      });
+    }
+
+    // Fallback Performance Bonus
+    const totalPerfClaimedOnChain = incomeInfo ? safeFloat(ethers.formatUnits(incomeInfo.performanceBonusEarned, 18)) : 0;
+    const simulatedPerfDailyClaimedSum = list.filter(t => t.type === "perf_daily").reduce((s, t) => s + t.amount, 0);
+    const perfInstantDiff = totalPerfClaimedOnChain - simulatedPerfDailyClaimedSum;
+    if (perfInstantDiff > 0.01) {
+      list.push({
+        type: "perf_instant",
+        typeName: "Performance Bonus (Instant)",
+        fromUser: "Contract",
+        amount: perfInstantDiff,
+        level: "-",
+        timestamp: sponsorJoin + 1800,
+        status: "Completed",
+        txHash: "0x_synthetic_perf_instant",
+        blockNumber: 0
+      });
+    }
+
+    // Helper to calculate the locked booster rate at a given timestamp in the simulation
+    function getLockedBoosterRateAtTime(timestamp) {
+      let lockedRate = 0;
+      let runningDeposit = initialDep;
+      let runningEarned = 0;
+
+      const upgrades = sortedDeps.filter(d => d.timestamp > sponsorJoin && d.timestamp <= timestamp);
+      if (upgrades.length === 0) return 0;
+
+      let currentSponsorJoin = sponsorJoin;
+      for (const upgrade of upgrades) {
+        const elapsed = upgrade.timestamp - currentSponsorJoin;
+        const days = Math.floor(elapsed / ONE_DAY_SECS);
+        
+        for (let d = 1; d <= days; d++) {
+          const payoutTime = currentSponsorJoin + d * ONE_DAY_SECS;
+          const maxROI = runningDeposit * 2.2;
+          const maxNetwork = runningDeposit * 4.0;
+          const maxLimit = Math.min(maxROI, maxNetwork);
+
+          const otherIncomes = list
+            .filter(e => e.timestamp > currentSponsorJoin && e.timestamp <= payoutTime && e.type !== "roi")
+            .reduce((sum, e) => sum + e.amount, 0);
+          
+          runningEarned += otherIncomes;
+
+          const rateBps = lockedRate > 0 ? lockedRate : getBoosterRateAtTime(payoutTime);
+          let dailyRoi = (runningDeposit * rateBps) / 10000;
+          if (runningEarned >= maxLimit) {
+            dailyRoi = 0;
+          } else if (runningEarned + dailyRoi > maxLimit) {
+            dailyRoi = maxLimit - runningEarned;
+          }
+          runningEarned += dailyRoi;
+        }
+
+        const maxROI = runningDeposit * 2.2;
+        if (runningEarned >= maxROI) {
+          lockedRate = 50;
+        } else {
+          const currentRate = getBoosterRateAtTime(upgrade.timestamp);
+          if (currentRate > 50) {
+            lockedRate = currentRate;
+          }
+        }
+
+        runningDeposit += upgrade.amount;
+        currentSponsorJoin = upgrade.timestamp;
+      }
+
+      return lockedRate;
+    }
+
     // Initialize sponsor's cumulative earnings tracker
     let sponsorCumulativeTotalEarned = 0;
 
@@ -1169,7 +1258,8 @@ export default function Dashboard() {
     for (let d = 1; d <= numDays; d++) {
       const dayTime = sponsorJoin + d * ONE_DAY_SECS;
       const dayStart = dayTime - ONE_DAY_SECS;
-      const rateBps = getBoosterRateAtTime(dayTime);
+      const lockedRate = getLockedBoosterRateAtTime(dayTime);
+      const rateBps = lockedRate > 0 ? lockedRate : getBoosterRateAtTime(dayTime);
       const currentDeposit = getActiveDepositAtTime(dayTime);
       const maxRoiCap = currentDeposit * 2.2;
       const maxNetworkCap = currentDeposit * 4.0;
@@ -1334,6 +1424,7 @@ export default function Dashboard() {
           const levelRoiCommission = (actualChildRoi * levelRoiPct) / 10000;
           
           if (levelRoiCommission > 0) {
+            const isClaimed = child.node && child.node.lastUpdateROI ? (matchTime <= child.node.lastUpdateROI) : false;
             list.push({
               type: "level_roi",
               typeName: "Level ROI Matching",
@@ -1341,7 +1432,7 @@ export default function Dashboard() {
               amount: levelRoiCommission,
               level: child.level,
               timestamp: matchTime,
-              status: "Completed",
+              status: isClaimed ? "Completed" : "Pending (Downline Claim)",
               txHash: `0x_lroi_${child.address.toLowerCase()}_${k}`,
               blockNumber: 0,
               isSimulated: true
@@ -1851,70 +1942,7 @@ export default function Dashboard() {
         }
       }
 
-      const simulatedLevelIncSum = baseTxs.filter(t => t.type === "level_income").reduce((s, t) => s + t.amount, 0);
-      const totalLevelIncOnChain = safeFloat(userData.levelIncomeEarned);
-      const diff = totalLevelIncOnChain - simulatedLevelIncSum;
-      if (diff > 0.01) {
-        baseTxs.push({
-          type: "level_income",
-          typeName: "Level Income",
-          fromUser: "Deeper Downline",
-          amount: diff,
-          level: ">1",
-          timestamp: mockTime + 1800,
-          status: "Completed",
-          txHash: "0x_fallback_level_inc",
-          blockNumber: 0
-        });
-      }
 
-      const foundPerfInstantSum = baseTxs
-        .filter(t => t.type === "perf_instant" && t.txHash !== "0x_synthetic_perf_instant")
-        .reduce((sum, t) => sum + t.amount, 0);
-
-      let simulatedPerfDailyClaimedSum = 0;
-      baseTxs.forEach(t => {
-        if (t.type === "perf_daily") {
-          const activeBonus = activeBonuses.find(b => b.tierIndex === t.tierIndex);
-          if (activeBonus) {
-            if (t.timestamp <= activeBonus.lastClaimTime) {
-              simulatedPerfDailyClaimedSum += t.amount;
-            }
-          }
-        }
-      });
-
-      const totalPerfClaimedOnChain = safeFloat(userData.performanceBonusEarned);
-      let perfInstantDiff = totalPerfClaimedOnChain - (simulatedPerfDailyClaimedSum + foundPerfInstantSum);
-      if (perfInstantDiff > 0.01) {
-        if (foundPerfInstantSum === 0) {
-          if (perfInstantDiff > 0.01 && perfInstantDiff <= 75) {
-            perfInstantDiff = 75;
-          } else if (perfInstantDiff > 75 && perfInstantDiff <= 150) {
-            perfInstantDiff = 150;
-          } else if (perfInstantDiff > 150 && perfInstantDiff <= 375) {
-            perfInstantDiff = 375;
-          } else if (perfInstantDiff > 375 && perfInstantDiff <= 750) {
-            perfInstantDiff = 750;
-          } else if (perfInstantDiff > 750 && perfInstantDiff <= 1500) {
-            perfInstantDiff = 1500;
-          } else if (perfInstantDiff > 1500 && perfInstantDiff <= 3750) {
-            perfInstantDiff = 3750;
-          }
-        }
-        
-        baseTxs.push({
-          type: "perf_instant",
-          typeName: "Performance Bonus (Instant)",
-          fromUser: "Contract",
-          amount: perfInstantDiff,
-          level: "-",
-          timestamp: mockTime + 1800,
-          status: "Completed",
-          txHash: "0x_synthetic_perf_instant",
-          blockNumber: 0
-        });
-      }
 
       baseTxs.sort((a, b) => {
         if (a.timestamp !== b.timestamp) {
@@ -2015,25 +2043,16 @@ export default function Dashboard() {
         }
 
         if (pending > 0) {
-          const totalBoosterRate = rate / 100;
-          let allowedDaily = 0;
-          let allowedBooster = 0;
-          if (totalBoosterRate > 0) {
-            allowedDaily = (pending * 0.005) / totalBoosterRate;
-            allowedBooster = pending - allowedDaily;
-          } else {
-            allowedDaily = pending;
-          }
-          
           runningTotalEarned += pending;
 
-          const dailyRoiSettled = baseTxs.some(t => t.type === "roi" && Math.abs(t.timestamp - payoutTime) < 30);
-          if (!dailyRoiSettled && allowedDaily > 0) {
+          const roiSettled = baseTxs.some(t => t.type === "roi" && Math.abs(t.timestamp - payoutTime) < 30);
+          if (!roiSettled) {
+            const isBoosted = rate > 0.5;
             baseTxs.push({
               type: "roi",
-              typeName: "Daily ROI Payout",
+              typeName: isBoosted ? "Daily & Booster ROI Payout" : "Daily ROI Payout",
               fromUser: "Contract",
-              amount: allowedDaily,
+              amount: pending,
               level: "-",
               timestamp: payoutTime,
               status: "Completed",
@@ -2041,24 +2060,6 @@ export default function Dashboard() {
               blockNumber: 0,
               isSimulated: true
             });
-          }
-
-          if (allowedBooster > 0) {
-            const boosterRoiSettled = baseTxs.some(t => t.type === "booster_roi" && Math.abs(t.timestamp - payoutTime) < 30);
-            if (!boosterRoiSettled) {
-              baseTxs.push({
-                type: "booster_roi",
-                typeName: "Booster ROI Payout",
-                fromUser: "Contract",
-                amount: allowedBooster,
-                level: "-",
-                timestamp: payoutTime,
-                status: "Completed",
-                txHash: `0x_pending_booster_${day}`,
-                blockNumber: 0,
-                isSimulated: true
-              });
-            }
           }
         }
       }
@@ -3481,8 +3482,8 @@ export default function Dashboard() {
                           <td style={{ padding: "12px 10px", fontSize: "13px" }} className="mono">{dateStr}</td>
                           <td style={{ padding: "12px 10px", fontSize: "13px", textAlign: "center" }}>
                             <span style={{
-                              background: tx.status === "Pending" ? "rgba(245, 158, 11, 0.15)" : "rgba(16, 185, 129, 0.15)",
-                              color: tx.status === "Pending" ? "#f59e0b" : "#10b981",
+                              background: tx.status?.startsWith("Pending") ? "rgba(245, 158, 11, 0.15)" : "rgba(16, 185, 129, 0.15)",
+                              color: tx.status?.startsWith("Pending") ? "#f59e0b" : "#10b981",
                               fontSize: "11px",
                               padding: "2px 8px",
                               borderRadius: "4px",

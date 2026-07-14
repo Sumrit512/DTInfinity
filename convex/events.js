@@ -157,6 +157,59 @@ export const getLedger = query({
       return 50;
     }
 
+    // Helper to calculate the locked booster rate at a given timestamp in the simulation
+    function getLockedBoosterRateAtTime(timestamp) {
+      let lockedRate = 0;
+      let runningDeposit = initialDep;
+      let runningEarned = 0;
+
+      const upgrades = sortedDeps.filter(d => d.time > sponsorJoin && d.time <= timestamp);
+      if (upgrades.length === 0) return 0;
+
+      let currentSponsorJoin = sponsorJoin;
+      for (const upgrade of upgrades) {
+        const elapsed = upgrade.time - currentSponsorJoin;
+        const days = Math.floor(elapsed / ONE_DAY_SECS);
+        
+        for (let d = 1; d <= days; d++) {
+          const payoutTime = currentSponsorJoin + d * ONE_DAY_SECS;
+          const maxROI = runningDeposit * 2.2;
+          const maxNetwork = runningDeposit * 4.0;
+          const maxLimit = Math.min(maxROI, maxNetwork);
+
+          const otherIncomes = rawEvents
+            .filter(e => e.timestamp > currentSponsorJoin && e.timestamp <= payoutTime && e.type !== "roi")
+            .reduce((sum, e) => sum + e.rawAmount, 0);
+          
+          runningEarned += otherIncomes;
+
+          const rateBps = lockedRate > 0 ? lockedRate : getBoosterRateAtTime(payoutTime);
+          let dailyRoi = (runningDeposit * rateBps) / 10000;
+          if (runningEarned >= maxLimit) {
+            dailyRoi = 0;
+          } else if (runningEarned + dailyRoi > maxLimit) {
+            dailyRoi = maxLimit - runningEarned;
+          }
+          runningEarned += dailyRoi;
+        }
+
+        const maxROI = runningDeposit * 2.2;
+        if (runningEarned >= maxROI) {
+          lockedRate = 50;
+        } else {
+          const currentRate = getBoosterRateAtTime(upgrade.time);
+          if (currentRate > 50) {
+            lockedRate = currentRate;
+          }
+        }
+
+        runningDeposit += upgrade.amount;
+        currentSponsorJoin = upgrade.time;
+      }
+
+      return lockedRate;
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════
     // UNIFIED CHRONOLOGICAL SIMULATION
     // All income streams are collected as raw (uncapped) events first,
@@ -353,6 +406,7 @@ export const getLedger = query({
           const levelRoiPct = levelROIPercentages[child.level - 1] || 0;
           const commission = (actualChildRoi * levelRoiPct) / 10000;
           if (commission > 0) {
+            const isClaimed = child.node && child.node.lastUpdateROI ? (matchTime <= child.node.lastUpdateROI) : false;
             rawEvents.push({
               type: "level_roi",
               typeName: "Level ROI Matching",
@@ -360,7 +414,7 @@ export const getLedger = query({
               rawAmount: commission,
               level: child.level.toString(),
               timestamp: matchTime,
-              status: "Completed",
+              status: isClaimed ? "Completed" : "Pending (Downline Claim)",
               txHash: `0x_lroi_${child.address}_${k}`,
               blockNumber: 0,
               isSimulated: true
@@ -428,29 +482,6 @@ export const getLedger = query({
       }
     });
 
-    // ── 4. Daily ROI + Booster ROI ────────────────────────────────────────────
-    for (let d = 1; d <= numDays; d++) {
-      const dayTime = sponsorJoin + d * ONE_DAY_SECS;
-      const rateBps = getBoosterRateAtTime(dayTime);
-      const currentDeposit = getActiveDepositAtTime(dayTime);
-      const rawDailyRoi = (currentDeposit * rateBps) / 10000;
-      if (rawDailyRoi > 0) {
-        const isBoosted = rateBps > 50;
-        rawEvents.push({
-          type: "roi",
-          typeName: isBoosted ? "Daily & Booster ROI Payout" : "Daily ROI Payout",
-          fromUser: "Contract",
-          rawAmount: rawDailyRoi,
-          level: "-",
-          timestamp: dayTime,
-          status: "Completed",
-          txHash: `0x_roi_${d}`,
-          blockNumber: 0,
-          isSimulated: true
-        });
-      }
-    }
-
     const totalLevelIncOnChain = args.levelIncomeEarned || 0;
     const simulatedLevelIncSum = rawEvents.filter(t => t.type === "level_income").reduce((s, t) => s + t.rawAmount, 0);
     const levelIncDiff = totalLevelIncOnChain - simulatedLevelIncSum;
@@ -485,6 +516,30 @@ export const getLedger = query({
         blockNumber: 0,
         isSimulated: true
       });
+    }
+
+    // ── 4. Daily ROI + Booster ROI ────────────────────────────────────────────
+    for (let d = 1; d <= numDays; d++) {
+      const dayTime = sponsorJoin + d * ONE_DAY_SECS;
+      const lockedRate = getLockedBoosterRateAtTime(dayTime);
+      const rateBps = lockedRate > 0 ? lockedRate : getBoosterRateAtTime(dayTime);
+      const currentDeposit = getActiveDepositAtTime(dayTime);
+      const rawDailyRoi = (currentDeposit * rateBps) / 10000;
+      if (rawDailyRoi > 0) {
+        const isBoosted = rateBps > 50;
+        rawEvents.push({
+          type: "roi",
+          typeName: isBoosted ? "Daily & Booster ROI Payout" : "Daily ROI Payout",
+          fromUser: "Contract",
+          rawAmount: rawDailyRoi,
+          level: "-",
+          timestamp: dayTime,
+          status: "Completed",
+          txHash: `0x_roi_${d}`,
+          blockNumber: 0,
+          isSimulated: true
+        });
+      }
     }
 
     // ── 5. Sort all events chronologically ───────────────────────────────────
