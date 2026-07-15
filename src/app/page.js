@@ -1100,26 +1100,51 @@ export default function Dashboard() {
             visited.add(childKey);
             const childNode = loadedDirectsMap[childKey] || treeNodes[childKey];
             if (childNode) {
-              const depositVal = safeFloat(childNode.totalDeposits);
-              const currentSponsorDeposit = getActiveDepositAtTime(childNode.registrationTime);
-              const qualifiedDirectsAtTime = directsData.filter(dr => dr.registrationTime <= childNode.registrationTime && dr.totalDeposits >= 50).length;
+              const childNodeDeps = childNode.deposits || [];
+              let sortedChildDeps = [...childNodeDeps].map(d => ({
+                amount: safeFloat(d.amount),
+                timestamp: Number(d.timestamp)
+              })).sort((a, b) => a.timestamp - b.timestamp);
 
-              if (depositVal >= 10 && currentSponsorDeposit >= 10 && qualifiedDirectsAtTime >= curr.level + 1) {
-                const pct = levelIncomePercentages[curr.level]; // Level 1 is index 0
-                const amount = (depositVal * pct) / 10000;
-                if (amount > 0) {
-                  list.push({
-                    type: "level_income",
-                    typeName: "Level Income",
-                    fromUser: childAddr,
-                    amount: amount,
-                    level: curr.level + 1,
-                    timestamp: childNode.registrationTime,
-                    status: "Completed",
-                    txHash: `0x_linc_${childAddr.toLowerCase()}_${curr.level + 1}`,
-                    blockNumber: 0,
-                    isSimulated: true
-                  });
+              const childUserTotalDeposits = safeFloat(childNode.totalDeposits);
+              const childDepsSum = sortedChildDeps.reduce((sum, d) => sum + d.amount, 0);
+
+              if (childDepsSum < childUserTotalDeposits - 0.01) {
+                sortedChildDeps.push({
+                  amount: childUserTotalDeposits - childDepsSum,
+                  timestamp: Number(childNode.registrationTime),
+                  txHash: "0x_fallback_child_dep"
+                });
+                sortedChildDeps.sort((a, b) => a.timestamp - b.timestamp);
+              }
+
+              let childRunningDepositTotal = 0;
+              for (let depIndex = 0; depIndex < sortedChildDeps.length; depIndex++) {
+                const dep = sortedChildDeps[depIndex];
+                childRunningDepositTotal += dep.amount;
+
+                const currentSponsorDeposit = getActiveDepositAtTime(dep.timestamp);
+                const qualifiedDirectsAtTime = directsData.filter(
+                  dr => dr.registrationTime <= dep.timestamp && dr.totalDeposits >= 50
+                ).length;
+
+                if (childRunningDepositTotal >= 10 && currentSponsorDeposit >= 10 && qualifiedDirectsAtTime >= curr.level + 1) {
+                  const pct = levelIncomePercentages[curr.level];
+                  const amount = (dep.amount * pct) / 10000;
+                  if (amount > 0) {
+                    list.push({
+                      type: "level_income",
+                      typeName: "Level Income",
+                      fromUser: childAddr,
+                      amount: amount,
+                      level: curr.level + 1,
+                      timestamp: dep.timestamp,
+                      status: "Completed",
+                      txHash: `0x_linc_${childAddr.toLowerCase()}_${curr.level + 1}_${depIndex}_${dep.timestamp}`,
+                      blockNumber: 0,
+                      isSimulated: true
+                    });
+                  }
                 }
               }
               queue.push({ address: childAddr, level: curr.level + 1 });

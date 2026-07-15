@@ -136,6 +136,13 @@ export const getDownlineTree = query({
           )
           .collect();
         const children = refs.map(r => r.referral);
+
+        const userDeps = await ctx.db
+          .query("deposits")
+          .withIndex("by_contract_address_user", (q) =>
+            q.eq("contractAddress", contractLower).eq("user", curr)
+          )
+          .collect();
         
         treeNodes[curr] = {
           address: user.address,
@@ -151,6 +158,7 @@ export const getDownlineTree = query({
           strongestLegVolume: user.strongestLegVolume.toFixed(2),
           boosterRate: user.boosterRate,
           children: children,
+          deposits: userDeps.map(d => ({ amount: d.amount, timestamp: d.time })),
         };
         
         for (const child of children) {

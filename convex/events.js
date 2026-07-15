@@ -248,28 +248,51 @@ export const getLedger = query({
             )
             .unique();
           if (childUser) {
-            const depositVal = childUser.totalDeposits;
-            const currentSponsorDeposit = getActiveDepositAtTime(childUser.registrationTime);
-            const qualifiedDirectsAtTime = directsData.filter(
-              dr => dr.registrationTime <= childUser.registrationTime && dr.totalDeposits >= 50
-            ).length;
+            const childDeps = await ctx.db
+              .query("deposits")
+              .withIndex("by_contract_address_user", (q) =>
+                q.eq("contractAddress", contractLower).eq("user", childAddr)
+              )
+              .collect();
 
-            if (depositVal >= 10 && currentSponsorDeposit >= 10 && qualifiedDirectsAtTime >= curr.level + 1) {
-              const pct = levelIncomePercentages[curr.level];
-              const amount = (depositVal * pct) / 10000;
-              if (amount > 0) {
-                rawEvents.push({
-                  type: "level_income",
-                  typeName: "Level Income",
-                  fromUser: childAddr,
-                  rawAmount: amount,
-                  level: (curr.level + 1).toString(),
-                  timestamp: childUser.registrationTime,
-                  status: "Completed",
-                  txHash: `0x_linc_${childAddr}_${curr.level + 1}`,
-                  blockNumber: 0,
-                  isSimulated: true
-                });
+            let sortedChildDeps = [...childDeps].sort((a, b) => a.time - b.time);
+            const childDepsSum = sortedChildDeps.reduce((sum, d) => sum + d.amount, 0);
+            if (childDepsSum < childUser.totalDeposits - 0.01) {
+              sortedChildDeps.push({
+                amount: childUser.totalDeposits - childDepsSum,
+                time: childUser.registrationTime,
+                txHash: "0x_fallback_child_dep",
+              });
+              sortedChildDeps.sort((a, b) => a.time - b.time);
+            }
+
+            let childRunningDepositTotal = 0;
+            for (let depIndex = 0; depIndex < sortedChildDeps.length; depIndex++) {
+              const dep = sortedChildDeps[depIndex];
+              childRunningDepositTotal += dep.amount;
+
+              const currentSponsorDeposit = getActiveDepositAtTime(dep.time);
+              const qualifiedDirectsAtTime = directsData.filter(
+                dr => dr.registrationTime <= dep.time && dr.totalDeposits >= 50
+              ).length;
+
+              if (childRunningDepositTotal >= 10 && currentSponsorDeposit >= 10 && qualifiedDirectsAtTime >= curr.level + 1) {
+                const pct = levelIncomePercentages[curr.level];
+                const commission = (dep.amount * pct) / 10000;
+                if (commission > 0) {
+                  rawEvents.push({
+                    type: "level_income",
+                    typeName: "Level Income",
+                    fromUser: childAddr,
+                    rawAmount: commission,
+                    level: (curr.level + 1).toString(),
+                    timestamp: dep.time,
+                    status: "Completed",
+                    txHash: `0x_linc_${childAddr}_${curr.level + 1}_${depIndex}_${dep.time}`,
+                    blockNumber: 0,
+                    isSimulated: true
+                  });
+                }
               }
             }
             levelIncQueue.push({ address: childAddr, level: curr.level + 1 });
