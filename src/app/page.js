@@ -3162,7 +3162,7 @@ export default function Dashboard() {
               </div>
             </div>
 
-            <div className="card" style={{ maxHeight: "315px", overflowY: "auto" }}>
+            <div className="card" style={{ maxHeight: "315px", overflow: "auto" }}>
               <div className="section-title" style={{ marginTop: 0 }}>Recent Transactions</div>
               {txs.length === 0 ? (
                 <div style={{ color: "var(--text-muted)", fontSize: "13px", padding: "10px 0" }}>
@@ -3777,47 +3777,49 @@ export default function Dashboard() {
             <p style={{ color: "var(--text-muted)", fontSize: "13px", lineHeight: "1.6", marginBottom: "15px" }}>
               Qualify for Performance Bonus: Make your Strongest Leg volume greater than or equal to Target, and all other legs combined volume greater than or equal to Target. Performance payouts are separate from Daily ROI caps.
             </p>
-            <table style={{ fontSize: "12px" }}>
-              <thead>
-                <tr>
-                  <th>Target Vol</th>
-                  <th>Instant Payout</th>
-                  <th>30-Day Daily Payout</th>
-                  <th>Your Leg Progress (Strong / Others)</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {PERFORMANCE_TIERS.map((tier, idx) => {
-                  const strongVol = parseFloat(userData.strongestLegVolume);
-                  const totalVol = parseFloat(userData.totalTeamVolume);
-                  const otherVol = totalVol - strongVol;
-                  const achieved = isRegistered && strongVol >= tier.target && otherVol >= tier.target;
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ fontSize: "12px" }}>
+                <thead>
+                  <tr>
+                    <th>Target Vol</th>
+                    <th>Instant Payout</th>
+                    <th>30-Day Daily Payout</th>
+                    <th>Your Leg Progress (Strong / Others)</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {PERFORMANCE_TIERS.map((tier, idx) => {
+                    const strongVol = parseFloat(userData.strongestLegVolume);
+                    const totalVol = parseFloat(userData.totalTeamVolume);
+                    const otherVol = totalVol - strongVol;
+                    const achieved = isRegistered && strongVol >= tier.target && otherVol >= tier.target;
 
-                  return (
-                    <tr key={idx}>
-                      <td className="mono">{tier.target.toLocaleString()} USDT</td>
-                      <td className="mono" style={{ color: "var(--up)" }}>+{tier.instant} USDT</td>
-                      <td className="mono">+{tier.daily} USDT/day</td>
-                      <td className="mono" style={{ color: "var(--text-muted)" }}>
-                        {strongVol.toFixed(0)} / {tier.target} | {otherVol.toFixed(0)} / {tier.target}
-                      </td>
-                      <td>
-                        <span 
-                          className="tag" 
-                          style={{ 
-                            background: achieved ? "rgba(95,227,168,0.12)" : "rgba(242,112,94,0.12)",
-                            color: achieved ? "var(--up)" : "var(--down)"
-                          }}
-                        >
-                          {achieved ? "Qualified" : "Locked"}
-                        </span>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                    return (
+                      <tr key={idx}>
+                        <td className="mono">{tier.target.toLocaleString()} USDT</td>
+                        <td className="mono" style={{ color: "var(--up)" }}>+{tier.instant} USDT</td>
+                        <td className="mono">+{tier.daily} USDT/day</td>
+                        <td className="mono" style={{ color: "var(--text-muted)" }}>
+                          {strongVol.toFixed(0)} / {tier.target} | {otherVol.toFixed(0)} / {tier.target}
+                        </td>
+                        <td>
+                          <span 
+                            className="tag" 
+                            style={{ 
+                              background: achieved ? "rgba(95,227,168,0.12)" : "rgba(242,112,94,0.12)",
+                              color: achieved ? "var(--up)" : "var(--down)"
+                            }}
+                          >
+                            {achieved ? "Qualified" : "Locked"}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
 
           {/* Sync Missed Tx Panel */}
