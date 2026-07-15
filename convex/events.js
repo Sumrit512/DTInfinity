@@ -149,7 +149,7 @@ export const getLedger = query({
         }
       }
 
-      if (refs25 >= 10) return 500;
+      if (refs25 >= 10) return 400;
       if (refs20 >= 8) return 250;
       if (refs15 >= 6) return 200;
       if (refs10 >= 4) return 150;
@@ -383,7 +383,7 @@ export const getLedger = query({
               }
             }
           }
-          if (cRefs25 >= 10) childRateBps = 500;
+          if (cRefs25 >= 10) childRateBps = 400;
           else if (cRefs20 >= 8) childRateBps = 250;
           else if (cRefs15 >= 6) childRateBps = 200;
           else if (cRefs10 >= 4) childRateBps = 150;

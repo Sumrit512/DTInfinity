@@ -6,7 +6,7 @@ import { useQuery, useMutation, useAction } from "convex/react";
 import { api } from "../../convex/_generated/api.js";
 
 // Default contract addresses (placeholders that user can update in settings)
-const DEFAULT_DT_INFINITY_ADDRESS = "0xE6b6AFc8603088A2F949e9c4D11C1050644C01c3";
+const DEFAULT_DT_INFINITY_ADDRESS = "0xBBc08a606b04A837ACe3007c0F0166E334AD4C5D";
 const DEFAULT_USDT_ADDRESS = "0x0aB8c2DfE9aD2e2D3f58E6006884cda5e6f1E7B9";
 
 // Simple USDT ABI
@@ -1154,7 +1154,7 @@ export default function Dashboard() {
         }
       }
 
-      if (refs25 >= 10) return 500;
+      if (refs25 >= 10) return 400;
       if (refs20 >= 8) return 250;
       if (refs15 >= 6) return 200;
       if (refs10 >= 4) return 150;
@@ -1397,7 +1397,7 @@ export default function Dashboard() {
               }
             }
           }
-          if (cRefs25 >= 10) childRateBps = 500;
+          if (cRefs25 >= 10) childRateBps = 400;
           else if (cRefs20 >= 8) childRateBps = 250;
           else if (cRefs15 >= 6) childRateBps = 200;
           else if (cRefs10 >= 4) childRateBps = 150;
