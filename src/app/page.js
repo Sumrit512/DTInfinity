@@ -2973,13 +2973,6 @@ export default function Dashboard() {
               </div>
               <div className="sub">Lifetime payouts withdrawn to your wallet</div>
             </div>
-            <div className="card mini-card">
-              <div className="k">Lifetime Business Value</div>
-              <div className="big mono" style={{ color: "var(--blue-bright)" }}>
-                {lifetimeTeamVolume.toFixed(2)} <span style={{ fontSize: "14px", color: "var(--text-muted)" }}>USDT</span>
-              </div>
-              <div className="sub">Cumulative team sales volume to date</div>
-            </div>
           </div>
 
           <div className="section-title">Income Capping Limits</div>
@@ -3123,6 +3116,23 @@ export default function Dashboard() {
             </div>
           )}
 
+          <div className="stat-row" style={{ gridTemplateColumns: "1fr 1fr", gap: "16px", marginBottom: "20px" }}>
+            <div className="card mini-card">
+              <div className="k">Strongest Leg Volume</div>
+              <div className="big mono" style={{ color: "var(--blue-bright)" }}>
+                {userData.strongestLegVolume} <span style={{ fontSize: "14px", color: "var(--text-muted)" }}>USDT</span>
+              </div>
+              <div className="sub">Highest single leg business volume</div>
+            </div>
+            <div className="card mini-card">
+              <div className="k">Other Legs Volume</div>
+              <div className="big mono" style={{ color: "var(--blue-bright)" }}>
+                {(parseFloat(userData.totalTeamVolume) - parseFloat(userData.strongestLegVolume)).toFixed(2)} <span style={{ fontSize: "14px", color: "var(--text-muted)" }}>USDT</span>
+              </div>
+              <div className="sub">Combined volume of all other legs</div>
+            </div>
+          </div>
+
           <div className="two-col">
             <div className="card team-card">
               <div className="section-title" style={{ marginTop: 0 }}>My Network Statistics</div>
@@ -3138,10 +3148,6 @@ export default function Dashboard() {
                 <div className="team-stat">
                   <div className="k">Total team count</div>
                   <div className="v">{userData.totalTeamCount}</div>
-                </div>
-                <div className="team-stat">
-                  <div className="k">Strongest Leg Vol</div>
-                  <div className="v">{userData.strongestLegVolume}</div>
                 </div>
                 <div className="team-stat">
                   <div className="k">Total team volume</div>
@@ -3215,12 +3221,8 @@ export default function Dashboard() {
                 <div className="v">{userData.totalTeamCount}</div>
               </div>
               <div className="team-stat">
-                <div className="k">Strongest Leg Volume</div>
-                <div className="v">{userData.strongestLegVolume} USDT</div>
-              </div>
-              <div className="team-stat">
-                <div className="k">Other Legs Volume</div>
-                <div className="v">{(parseFloat(userData.totalTeamVolume) - parseFloat(userData.strongestLegVolume)).toFixed(2)} USDT</div>
+                <div className="k">Lifetime Business Value</div>
+                <div className="v" style={{ color: "var(--blue-bright)" }}>{lifetimeTeamVolume.toFixed(2)} USDT</div>
               </div>
             </div>
           </div>
