@@ -6,7 +6,7 @@ import { useQuery, useMutation, useAction } from "convex/react";
 import { api } from "../../convex/_generated/api.js";
 
 // Default contract addresses (placeholders that user can update in settings)
-const DEFAULT_DT_INFINITY_ADDRESS = "0xBBc08a606b04A837ACe3007c0F0166E334AD4C5D";
+const DEFAULT_DT_INFINITY_ADDRESS = "0x70f53a7a65269992cf2d01ee7d6fe77e3da990d9";
 const DEFAULT_USDT_ADDRESS = "0x0aB8c2DfE9aD2e2D3f58E6006884cda5e6f1E7B9";
 
 // Simple USDT ABI
@@ -351,7 +351,8 @@ export default function Dashboard() {
         savedDT.toLowerCase() === "0x4ee2e6e9306bd8f5b6e111062aae9c259f7b4df3" ||
         savedDT.toLowerCase() === "0xa2306ed14dc4e1f0c876260621e7dba5a7797eff" ||
         savedDT.toLowerCase() === "0x32116f10442966206c64279105c6d783743fb186" ||
-        savedDT.toLowerCase() === "0xe1c223d8a3d694e67a1a0514010b11722f41cb00"
+        savedDT.toLowerCase() === "0xe1c223d8a3d694e67a1a0514010b11722f41cb00" ||
+        savedDT.toLowerCase() === "0xbbc08a606b04a837ace3007c0f0166e334ad4c5d"
       )) {
         localStorage.removeItem("DT_INFINITY_ADDRESS");
         savedDT = null;
@@ -2854,7 +2855,7 @@ export default function Dashboard() {
 
         {/* 1. DASHBOARD VIEW */}
         <div className={`view ${activeView === "dashboard" ? "active" : ""}`}>
-          {pendingQualifications.length > 0 && (
+          {pendingQualifications.length > 0 && networkCapPercent < 100 && (
             <div className="card" style={{
               background: "rgba(94, 200, 242, 0.06)",
               border: "2px dashed var(--blue-bright)",
