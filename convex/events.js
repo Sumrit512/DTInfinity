@@ -681,11 +681,14 @@ export const getLedger = query({
     });
 
     // ── Final cap enforcement pass ────────────────────────────────────────────
-    // Applies chronologically to ALL entries (both on-chain confirmed and simulated).
-    // • Daily ROI / Booster ROI: stopped when runningTotal >= deposit × 2.2
-    // • All other income:        stopped when runningTotal >= deposit × 4.0
+    // Applies chronologically to simulated entries, using the user's final/current deposit limit
+    // to match on-chain dynamic/state-based capping behavior upon package upgrades.
+    // Confirmed on-chain transactions are never capped down.
+    // • Daily ROI / Booster ROI: stopped when runningTotal >= final deposit × 2.2
+    // • All other income:        stopped when runningTotal >= final deposit × 4.0
     let runningTotalEarned = 0;
     let runningDeposit = 0;
+    const finalDeposit = rootUser.totalDeposits || 0;
 
     const cappedTxs = finalTxs.map(tx => {
       if (tx.type === "deposit") {
@@ -694,13 +697,18 @@ export const getLedger = query({
       }
       if (tx.type === "withdraw") return tx;
 
-      const maxROI     = runningDeposit * 2.2;
-      const maxNetwork = runningDeposit * 4.0;
+      const maxROI     = finalDeposit * 2.2;
+      const maxNetwork = finalDeposit * 4.0;
       
       const allowedNetwork = Math.max(0, maxNetwork - runningTotalEarned);
       const startAmount = tx.rawAmount !== undefined ? tx.rawAmount : tx.amount;
       let allowed = startAmount;
       
+      if (!tx.isSimulated) {
+        runningTotalEarned += allowed;
+        return tx;
+      }
+
       if (tx.type === "roi" || tx.type === "booster_roi") {
         const allowedROI = Math.max(0, maxROI - runningTotalEarned);
         allowed = Math.min(startAmount, allowedNetwork, allowedROI);

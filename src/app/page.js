@@ -1286,8 +1286,8 @@ export default function Dashboard() {
       const lockedRate = getLockedBoosterRateAtTime(dayTime);
       const rateBps = lockedRate > 0 ? lockedRate : getBoosterRateAtTime(dayTime);
       const currentDeposit = getActiveDepositAtTime(dayTime);
-      const maxRoiCap = currentDeposit * 2.2;
-      const maxNetworkCap = currentDeposit * 4.0;
+      const maxRoiCap = sponsorDeposit * 2.2;
+      const maxNetworkCap = sponsorDeposit * 4.0;
       const sponsorMaxLimit = Math.min(maxRoiCap, maxNetworkCap);
 
       // Add any simulated Level Income from list that occurred on this day and is after lastUpdateROI
@@ -1477,8 +1477,7 @@ export default function Dashboard() {
         const salaryTime = streamStart + day * PERF_ONE_DAY_SECS;
         
         // Cap by the 400% Network Cap
-        const currentDeposit = getActiveDepositAtTime(salaryTime);
-        const maxNetworkCap = currentDeposit * 4.0;
+        const maxNetworkCap = sponsorDeposit * 4.0;
         
         let salaryAmt = bonus.dailyRate;
         if (sponsorCumulativeTotalEarned >= maxNetworkCap) {
@@ -1981,6 +1980,7 @@ export default function Dashboard() {
       let runningTotalEarned = 0;
       let runningROIEarned = 0;
       let runningDeposit = 0;
+      const finalDeposit = safeFloat(userData.totalDeposits);
 
       baseTxs = baseTxs.map(tx => {
         if (tx.type === "deposit") {
@@ -1994,8 +1994,8 @@ export default function Dashboard() {
           return tx;
         }
         
-        const maxNetwork = runningDeposit * 4;
-        const maxROI = runningDeposit * 2.2;
+        const maxNetwork = finalDeposit * 4;
+        const maxROI = finalDeposit * 2.2;
         
         const allowedNetwork = Math.max(0, maxNetwork - runningTotalEarned);
         let allowed = tx.amount;
@@ -2236,6 +2236,45 @@ export default function Dashboard() {
     link.click();
     document.body.removeChild(link);
   }
+
+  // Calculate lifetime business value (sum of deposits of all downline referrals)
+  const lifetimeBusinessValue = useMemo(() => {
+    if (!walletAddress || !treeNodes) return 0;
+    
+    let total = 0;
+    const visited = new Set();
+    const queue = [];
+    
+    const rootNode = treeNodes[walletAddress.toLowerCase()];
+    if (rootNode && rootNode.children) {
+      rootNode.children.forEach(child => {
+        const childLower = child.toLowerCase();
+        if (!visited.has(childLower)) {
+          visited.add(childLower);
+          queue.push(childLower);
+        }
+      });
+    }
+    
+    while (queue.length > 0) {
+      const currentAddr = queue.shift();
+      const node = treeNodes[currentAddr];
+      if (node) {
+        total += safeFloat(node.totalDeposits);
+        if (node.children) {
+          node.children.forEach(child => {
+            const childLower = child.toLowerCase();
+            if (!visited.has(childLower)) {
+              visited.add(childLower);
+              queue.push(childLower);
+            }
+          });
+        }
+      }
+    }
+    
+    return total;
+  }, [walletAddress, treeNodes]);
 
   // Display-ready values calculated chronologically from txs list
   const statsToDisplay = useMemo(() => {
@@ -3064,57 +3103,60 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {activeBonuses.length > 0 && (
-            <div style={{ marginTop: "20px", marginBottom: "20px" }}>
-              <div className="section-title" style={{ fontSize: "14px", color: "var(--text-muted)", marginBottom: "10px", textTransform: "uppercase", letterSpacing: "0.5px" }}>Active Daily Salary Streams (Performance Bonus)</div>
-              <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                {activeBonuses.map((bonus, bIdx) => {
-                  const nowUnix = Math.floor(Date.now() / 1000);
-                  const timeLeftStream = Math.max(0, bonus.endTime - nowUnix);
-                  const isExpired = timeLeftStream === 0;
-                  
-                  return (
-                    <div key={bIdx} className="card" style={{
-                      background: "rgba(94, 200, 242, 0.03)",
-                      border: "1px solid var(--border)",
-                      borderRadius: "10px",
-                      padding: "15px",
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center"
-                    }}>
-                      <div>
-                        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                          <span style={{ fontWeight: "600", fontSize: "13.5px", color: "#fff" }}>
-                            Daily Stream #{bIdx + 1} (Tier {bonus.tierIndex + 1})
-                          </span>
-                          <span style={{
-                            fontSize: "10px",
-                            background: isExpired ? "rgba(242, 112, 94, 0.15)" : "rgba(94, 200, 242, 0.15)",
-                            color: isExpired ? "var(--down)" : "var(--blue-bright)",
-                            padding: "2px 8px",
-                            borderRadius: "4px",
-                            fontWeight: "600"
-                          }}>
-                            {isExpired ? "Expired" : "Active"}
-                          </span>
+          {(() => {
+            const activeStreams = activeBonuses.filter(bonus => {
+              const nowUnix = Math.floor(Date.now() / 1000);
+              return (Number(bonus.endTime) - nowUnix) > 0;
+            });
+            if (activeStreams.length === 0) return null;
+            return (
+              <div style={{ marginTop: "20px", marginBottom: "20px" }}>
+                <div className="section-title" style={{ fontSize: "14px", color: "var(--text-muted)", marginBottom: "10px", textTransform: "uppercase", letterSpacing: "0.5px" }}>Active Daily Salary Streams (Performance Bonus)</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                  {activeStreams.map((bonus, bIdx) => {
+                    const nowUnix = Math.floor(Date.now() / 1000);
+                    const timeLeftStream = Math.max(0, bonus.endTime - nowUnix);
+                    return (
+                      <div key={bIdx} className="card" style={{
+                        background: "rgba(94, 200, 242, 0.03)",
+                        border: "1px solid var(--border)",
+                        borderRadius: "10px",
+                        padding: "15px",
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center"
+                      }}>
+                        <div>
+                          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                            <span style={{ fontWeight: "600", fontSize: "13.5px", color: "#fff" }}>
+                              Daily Stream #{bonus.tierIndex + 1} (Tier {bonus.tierIndex + 1})
+                            </span>
+                            <span style={{
+                              fontSize: "10px",
+                              background: "rgba(94, 200, 242, 0.15)",
+                              color: "var(--blue-bright)",
+                              padding: "2px 8px",
+                              borderRadius: "4px",
+                              fontWeight: "600"
+                            }}>
+                              Active
+                            </span>
+                          </div>
+                          <div style={{ fontSize: "11.5px", color: "var(--text-muted)", marginTop: "4px" }}>
+                            Rate: <span className="mono" style={{ color: "var(--up)", fontWeight: "600" }}>+{bonus.dailyRate} USDT/day</span>
+                          </div>
                         </div>
-                        <div style={{ fontSize: "11.5px", color: "var(--text-muted)", marginTop: "4px" }}>
-                          Rate: <span className="mono" style={{ color: "var(--up)", fontWeight: "600" }}>+{bonus.dailyRate} USDT/day</span>
-                        </div>
-                      </div>
-                      
-                      {!isExpired && (
+                        
                         <div className="mono" style={{ textAlign: "right", fontSize: "12px", color: "var(--text-muted)" }}>
                           Time Left: <span style={{ color: "#fff", background: "rgba(255,255,255,0.06)", padding: "4px 8px", borderRadius: "4px", fontWeight: "600" }}>{formatCountdown(timeLeftStream)}</span>
                         </div>
-                      )}
-                    </div>
-                  );
-                })}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
 
           <div className="stat-row" style={{ gridTemplateColumns: "1fr 1fr", gap: "16px", marginBottom: "20px" }}>
             <div className="card mini-card">
@@ -3150,8 +3192,12 @@ export default function Dashboard() {
                   <div className="v">{userData.totalTeamCount}</div>
                 </div>
                 <div className="team-stat">
-                  <div className="k">Total team volume</div>
-                  <div className="v">{userData.totalTeamVolume}</div>
+                  <div className="k">Strong Leg Volume</div>
+                  <div className="v">{userData.strongestLegVolume}</div>
+                </div>
+                <div className="team-stat">
+                  <div className="k">Lifetime Business Value</div>
+                  <div className="v">{lifetimeBusinessValue.toFixed(2)}</div>
                 </div>
               </div>
               <div className="ref-link">
@@ -3168,35 +3214,38 @@ export default function Dashboard() {
               </div>
             </div>
 
-            <div className="card" style={{ maxHeight: "315px", overflow: "auto" }}>
-              <div className="section-title" style={{ marginTop: 0 }}>Recent Transactions</div>
-              {txs.length === 0 ? (
-                <div style={{ color: "var(--text-muted)", fontSize: "13px", padding: "10px 0" }}>
-                  {walletConnected 
-                    ? "No recent transaction history found in the last 5000 blocks." 
-                    : "Please connect wallet to view your on-chain transaction history."}
+            {(() => {
+              const nonZeroTxs = txs.filter(tx => safeFloat(tx.amount) > 0);
+              return (
+                <div className="card" style={{ maxHeight: "315px", overflow: "auto" }}>
+                  <div className="section-title" style={{ marginTop: 0 }}>Recent Transactions</div>
+                  {nonZeroTxs.length === 0 ? (
+                    <div style={{ color: "var(--text-muted)", fontSize: "13px", padding: "10px 0" }}>
+                      {walletConnected 
+                        ? "No recent transaction history found." 
+                        : "Please connect wallet to view your on-chain transaction history."}
+                    </div>
+                  ) : (
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Type</th>
+                          <th style={{ textAlign: "right" }}>Amount</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {nonZeroTxs.map((tx, idx) => (
+                          <tr key={idx}>
+                            <td><span className={tx.tagClass}>{tx.typeName}</span></td>
+                            <td style={{ textAlign: "right" }} className="amt-pos">{tx.amount}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
                 </div>
-              ) : (
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Type</th>
-                      <th>Detail</th>
-                      <th style={{ textAlign: "right" }}>Amount</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {txs.map((tx, idx) => (
-                      <tr key={idx}>
-                        <td><span className={tx.tagClass}>{tx.typeName}</span></td>
-                        <td>{tx.detail}</td>
-                        <td style={{ textAlign: "right" }} className="amt-pos">{tx.amount}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
+              );
+            })()}
           </div>
         </div>
 
