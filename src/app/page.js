@@ -1287,8 +1287,8 @@ export default function Dashboard() {
       const lockedRate = getLockedBoosterRateAtTime(dayTime);
       const rateBps = lockedRate > 0 ? lockedRate : getBoosterRateAtTime(dayTime);
       const currentDeposit = getActiveDepositAtTime(dayTime);
-      const maxRoiCap = sponsorDeposit * 2.2;
-      const maxNetworkCap = sponsorDeposit * 4.0;
+      const maxRoiCap = currentDeposit * 2.2;
+      const maxNetworkCap = currentDeposit * 4.0;
       const sponsorMaxLimit = Math.min(maxRoiCap, maxNetworkCap);
 
       // Add any simulated Level Income from list that occurred on this day and is after lastUpdateROI
@@ -1478,7 +1478,8 @@ export default function Dashboard() {
         const salaryTime = streamStart + day * PERF_ONE_DAY_SECS;
         
         // Cap by the 400% Network Cap
-        const maxNetworkCap = sponsorDeposit * 4.0;
+        const activeDeposit = getActiveDepositAtTime(salaryTime);
+        const maxNetworkCap = activeDeposit * 4.0;
         
         let salaryAmt = bonus.dailyRate;
         if (sponsorCumulativeTotalEarned >= maxNetworkCap) {
@@ -1995,8 +1996,8 @@ export default function Dashboard() {
           return tx;
         }
         
-        const maxNetwork = finalDeposit * 4;
-        const maxROI = finalDeposit * 2.2;
+        const maxNetwork = runningDeposit * 4;
+        const maxROI = runningDeposit * 2.2;
         
         const allowedNetwork = Math.max(0, maxNetwork - runningTotalEarned);
         let allowed = tx.amount;
@@ -3021,7 +3022,7 @@ export default function Dashboard() {
               <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "10px" }}>
                 <span style={{ fontWeight: "600", fontSize: "14px" }}>ROI Limit Cap (220% Max)</span>
                 <span className="mono" style={{ fontSize: "14px", color: "var(--blue-bright)" }}>
-                  {currentRoiEarned.toFixed(2)} / {maxRoiCap.toFixed(2)} USDT
+                  {Math.min(currentRoiEarned, maxRoiCap).toFixed(2)} / {maxRoiCap.toFixed(2)} USDT
                 </span>
               </div>
               <div className="progress-bg" style={{ background: "var(--surface-2)", height: "10px", borderRadius: "5px", overflow: "hidden", border: "1px solid var(--border)", position: "relative" }}>

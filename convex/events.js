@@ -697,8 +697,8 @@ export const getLedger = query({
       }
       if (tx.type === "withdraw") return tx;
 
-      const maxROI     = finalDeposit * 2.2;
-      const maxNetwork = finalDeposit * 4.0;
+      const maxROI     = runningDeposit * 2.2;
+      const maxNetwork = runningDeposit * 4.0;
       
       const allowedNetwork = Math.max(0, maxNetwork - runningTotalEarned);
       const startAmount = tx.rawAmount !== undefined ? tx.rawAmount : tx.amount;
