@@ -2312,6 +2312,9 @@ export default function Dashboard() {
     let perfInstant = 0;
 
     txs.forEach(tx => {
+      if (tx.status && tx.status.startsWith("Pending")) {
+        return;
+      }
       if (tx.type === "roi") dailyROI += tx.amount;
       else if (tx.type === "booster_roi") boosterROI += tx.amount;
       else if (tx.type === "level_income") levelIncome += tx.amount;
