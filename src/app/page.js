@@ -2379,6 +2379,9 @@ export default function Dashboard() {
       // Do not show transactions with 0.00 USDT amounts
       if (parseFloat(tx.amount.toFixed(2)) === 0) return false;
 
+      // Do not show transactions with pending status
+      if (tx.status && tx.status.startsWith("Pending")) return false;
+
       // 1. Filter Type
       if (filterType !== "all") {
         if (filterType === "deposit" && tx.type !== "deposit") return false;
