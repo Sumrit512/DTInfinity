@@ -22,36 +22,28 @@ export const syncOnChainEvents = mutation({
   handler: async (ctx, args) => {
     const contractLower = args.contractAddress.toLowerCase();
     const userLower = args.user.toLowerCase();
-
-    // Delete any old fallback/simulated events for this user to allow regenerating hourly payouts
-    const oldSims = await ctx.db
+    
+    // Clear all existing events for this user and contract to prevent stale leftovers from previous testnet runs
+    const existingEvents = await ctx.db
       .query("onChainEvents")
       .withIndex("by_contract_address_user_time", (q) =>
         q.eq("contractAddress", contractLower).eq("user", userLower)
       )
       .collect();
-
-    for (const doc of oldSims) {
-      if (doc.txHash.startsWith("0x_fallback_") || doc.isSimulated) {
-        await ctx.db.delete(doc._id);
-      }
+    for (const doc of existingEvents) {
+      await ctx.db.delete(doc._id);
     }
 
+    // Insert the current active list of events
     for (const event of args.events) {
       const txHashLower = event.txHash.toLowerCase();
-      const existing = await ctx.db
-        .query("onChainEvents")
-        .withIndex("by_txHash", (q) => q.eq("txHash", txHashLower))
-        .unique();
-      if (!existing) {
-        await ctx.db.insert("onChainEvents", {
-          ...event,
-          contractAddress: contractLower,
-          user: userLower,
-          txHash: txHashLower,
-          fromUser: event.fromUser.toLowerCase(),
-        });
-      }
+      await ctx.db.insert("onChainEvents", {
+        ...event,
+        contractAddress: contractLower,
+        user: userLower,
+        txHash: txHashLower,
+        fromUser: event.fromUser.toLowerCase(),
+      });
     }
   },
 });
@@ -101,15 +93,5 @@ export const getLedger = query({
     })).sort((a, b) => b.timestamp - a.timestamp);
 
     return sorted;
-  }
-});
-
-export const clearAllOnChainEvents = mutation({
-  args: {},
-  handler: async (ctx) => {
-    const all = await ctx.db.query("onChainEvents").collect();
-    for (const doc of all) {
-      await ctx.db.delete(doc._id);
-    }
   }
 });
