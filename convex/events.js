@@ -22,6 +22,21 @@ export const syncOnChainEvents = mutation({
   handler: async (ctx, args) => {
     const contractLower = args.contractAddress.toLowerCase();
     const userLower = args.user.toLowerCase();
+
+    // Delete any old fallback/simulated events for this user to allow regenerating hourly payouts
+    const oldSims = await ctx.db
+      .query("onChainEvents")
+      .withIndex("by_contract_address_user_time", (q) =>
+        q.eq("contractAddress", contractLower).eq("user", userLower)
+      )
+      .collect();
+
+    for (const doc of oldSims) {
+      if (doc.txHash.startsWith("0x_fallback_") || doc.isSimulated) {
+        await ctx.db.delete(doc._id);
+      }
+    }
+
     for (const event of args.events) {
       const txHashLower = event.txHash.toLowerCase();
       const existing = await ctx.db
