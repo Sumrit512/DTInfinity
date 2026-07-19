@@ -185,7 +185,7 @@ export default function Dashboard() {
   const [searchFromUser, setSearchFromUser] = useState("");
   const [searchLevel, setSearchLevel] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
-  
+
   // Real-time ticking simulation states
   const [oneDay, setOneDay] = useState(86400n);
   const [perfOneDay, setPerfOneDay] = useState(86400n);
@@ -347,7 +347,7 @@ export default function Dashboard() {
       setOrigin(window.location.origin);
       let savedDT = localStorage.getItem("DT_INFINITY_ADDRESS");
       if (savedDT && (
-        savedDT.toLowerCase() === "0xa374e919738dc198213a497937f396d275e348f7" || 
+        savedDT.toLowerCase() === "0xa374e919738dc198213a497937f396d275e348f7" ||
         savedDT.toLowerCase() === "0x4ee2e6e9306bd8f5b6e111062aae9c259f7b4df3" ||
         savedDT.toLowerCase() === "0xa2306ed14dc4e1f0c876260621e7dba5a7797eff" ||
         savedDT.toLowerCase() === "0x32116f10442966206c64279105c6d783743fb186" ||
@@ -434,7 +434,7 @@ export default function Dashboard() {
           setWalletAddress(addr);
           setWalletConnected(true);
           setWithdrawAddressInput(addr); // Autofill withdrawal address input
-          
+
           const network = await provider.getNetwork();
           const chainId = network.chainId;
           if (chainId === 97n) {
@@ -542,10 +542,10 @@ export default function Dashboard() {
         const provider = new ethers.BrowserProvider(window.ethereum);
         contract = new ethers.Contract(dtInfinityAddress, DT_INFINITY_ABI, provider);
       }
-      
+
       const registered = await contract.isUserRegistered(addr);
       if (!registered) return;
-      
+
       const [basicInfo, networkInfo, directs, boosterRate, incomeInfo] = await Promise.all([
         contract.getUserBasicInfo(addr),
         contract.getUserNetworkInfo(addr),
@@ -553,7 +553,7 @@ export default function Dashboard() {
         contract.getBoosterRate(addr),
         contract.getUserIncomeInfo(addr)
       ]);
-      
+
       const nodeData = {
         address: addr,
         sponsor: basicInfo.sponsor,
@@ -574,7 +574,7 @@ export default function Dashboard() {
         levelROIEarned: formatUSDT(incomeInfo.levelROIEarned),
         performanceBonusEarned: formatUSDT(incomeInfo.performanceBonusEarned)
       };
-      
+
       // Sync child to Convex
       try {
         await upsertUserMutation({
@@ -614,7 +614,7 @@ export default function Dashboard() {
     if (!window.ethereum) return;
     try {
       const provider = new ethers.BrowserProvider(window.ethereum);
-      
+
       const network = await provider.getNetwork();
       const chainId = network.chainId;
       if (chainId !== targetChainId) {
@@ -653,7 +653,7 @@ export default function Dashboard() {
         console.warn("Could not read PERF_ONE_DAY", e);
         currentPerfOneDayVal = currentOneDayVal;
       }
-      
+
       let registered = false;
       try {
         registered = await dtContract.isUserRegistered(addr);
@@ -738,7 +738,7 @@ export default function Dashboard() {
           try {
             const loadTreeRecursively = async (addresses, currentLevel) => {
               if (currentLevel >= 20 || !addresses || addresses.length === 0) return;
-              
+
               // Query in parallel chunks of 30 to avoid RPC rate limits
               const chunkSize = 30;
               const results = [];
@@ -747,7 +747,7 @@ export default function Dashboard() {
                 const chunkResults = await Promise.all(chunk.map(childAddr => loadTreeNode(childAddr, dtContract)));
                 results.push(...chunkResults);
               }
-              
+
               const nextLevelAddresses = [];
               results.forEach(res => {
                 if (res) {
@@ -817,7 +817,7 @@ export default function Dashboard() {
                   const dailyRateVal = PERFORMANCE_TIERS[t].daily;
                   const startTimeVal = claimTime;
                   const endTimeVal = claimTime + 30 * PERF_ONE_DAY_SECS;
-                  
+
                   if (!bonusesMapped.some(b => b.tierIndex === t)) {
                     bonusesMapped.push({
                       tierIndex: t,
@@ -887,23 +887,23 @@ export default function Dashboard() {
           "https://data-seed-prebsc-2-s1.binance.org:8545",
           "https://data-seed-prebsc-1-s2.binance.org:8545"
         ];
-        
+
         for (const url of rpcUrls) {
           try {
             const publicProvider = new ethers.JsonRpcProvider(url, 97, { staticNetwork: true });
             const latestBlock = Number(await publicProvider.getBlockNumber());
             let fromBlockVal = deploymentBlock ? (isNaN(Number(deploymentBlock)) ? 0 : Number(deploymentBlock)) : 0;
-            
+
             // Limit search range to prevent browser freezing if block is 0 or too far back
             if (fromBlockVal === 0) {
               fromBlockVal = Math.max(0, latestBlock - 50000);
             } else if ((latestBlock - fromBlockVal) > 200000) {
               fromBlockVal = Math.max(0, latestBlock - 200000);
             }
-            
+
             const dtContractPublic = new ethers.Contract(dtInfinityAddress, DT_INFINITY_ABI, publicProvider);
             const filter = await dtContractPublic.filters.PerformanceBonusClaimed(addr);
-            
+
             let allEvents = [];
             let currentBlock = fromBlockVal;
             while (currentBlock <= latestBlock) {
@@ -914,14 +914,14 @@ export default function Dashboard() {
               }
               currentBlock = toBlock + 1;
             }
-            
+
             perfClaims = allEvents.map((event, idx) => {
               const args = event.args;
               const tierIdx = Number(args.tierIndex);
               const chooseInstant = args.chooseInstant;
               const time = Number(args.time);
               const tier = PERFORMANCE_TIERS[tierIdx];
-              
+
               return {
                 type: chooseInstant ? "perf_instant" : "perf_claim",
                 typeName: chooseInstant ? "Performance Bonus (Instant)" : "Performance Bonus Claimed",
@@ -1084,16 +1084,16 @@ export default function Dashboard() {
     const levelIncomePercentages = [500, 200, 100, 100, 100];
     const queue = [{ address: addr, level: 0 }];
     const visited = new Set([addr.toLowerCase()]);
-    
+
     let head = 0;
     while (head < queue.length) {
       const curr = queue[head++];
       if (curr.level >= 5) continue;
-      
+
       const currNode = curr.address.toLowerCase() === addr.toLowerCase()
         ? { children: directs || directsList }
         : (loadedDirectsMap[curr.address.toLowerCase()] || treeNodes[curr.address.toLowerCase()]);
-        
+
       if (currNode && currNode.children) {
         currNode.children.forEach(childAddr => {
           const childKey = childAddr.toLowerCase();
@@ -1237,7 +1237,7 @@ export default function Dashboard() {
       for (const upgrade of upgrades) {
         const elapsed = upgrade.timestamp - currentSponsorJoin;
         const days = Math.floor(elapsed / ONE_DAY_SECS);
-        
+
         for (let d = 1; d <= days; d++) {
           const payoutTime = currentSponsorJoin + d * ONE_DAY_SECS;
           const maxROI = runningDeposit * 2.2;
@@ -1247,7 +1247,7 @@ export default function Dashboard() {
           const otherIncomes = list
             .filter(e => e.timestamp > currentSponsorJoin && e.timestamp <= payoutTime && e.type !== "roi")
             .reduce((sum, e) => sum + e.amount, 0);
-          
+
           runningEarned += otherIncomes;
 
           const rateBps = lockedRate > 0 ? lockedRate : getBoosterRateAtTime(payoutTime);
@@ -1307,16 +1307,16 @@ export default function Dashboard() {
 
       // Daily ROI (Includes booster if active)
       let dailyRoiAmt = (currentDeposit * rateBps) / 10000;
-      
+
       let actualDailyRoi = dailyRoiAmt;
       if (sponsorCumulativeTotalEarned >= sponsorMaxLimit) {
         actualDailyRoi = 0;
       } else if (sponsorCumulativeTotalEarned + dailyRoiAmt > sponsorMaxLimit) {
         actualDailyRoi = sponsorMaxLimit - sponsorCumulativeTotalEarned;
       }
-      
+
       sponsorCumulativeTotalEarned += actualDailyRoi;
-      
+
       if (actualDailyRoi > 0) {
         const isBoosted = rateBps > 50;
         list.push({
@@ -1344,16 +1344,16 @@ export default function Dashboard() {
     const downlinesForROI = [];
     const roiQueue = [{ address: addr, level: 0 }];
     const roiVisited = new Set([addr.toLowerCase()]);
-    
+
     let roiHead = 0;
     while (roiHead < roiQueue.length) {
       const curr = roiQueue[roiHead++];
       if (curr.level >= 20) continue;
-      
+
       const currNode = curr.address.toLowerCase() === addr.toLowerCase()
         ? { children: directs || directsList }
         : (loadedDirectsMap[curr.address.toLowerCase()] || treeNodes[curr.address.toLowerCase()]);
-        
+
       if (currNode && currNode.children) {
         currNode.children.forEach(childAddr => {
           const childKey = childAddr.toLowerCase();
@@ -1382,7 +1382,7 @@ export default function Dashboard() {
       if (numChildDays <= 0) return;
 
       const childNode = child.node;
-      
+
       let childNonRoi = 0;
       if (childNode) {
         childNonRoi = safeFloat(childNode.levelIncomeEarned)
@@ -1407,7 +1407,7 @@ export default function Dashboard() {
               });
             }
           });
-          
+
           let cRefs5 = 0, cRefs10 = 0, cRefs15 = 0, cRefs20 = 0, cRefs25 = 0;
           for (const gc of childDirectsData) {
             if (gc.registrationTime > matchTime) continue;
@@ -1438,7 +1438,7 @@ export default function Dashboard() {
         } else if (childCumulative + childRoiAmt > childMaxROI) {
           actualChildRoi = childMaxROI - childCumulative;
         }
-        
+
         childCumulative += actualChildRoi;
 
         // Check if sponsor qualifies at matchTime
@@ -1448,7 +1448,7 @@ export default function Dashboard() {
         if (sponsorDeposit >= 50 && qualifiedDirectsOnDay >= child.level && actualChildRoi > 0) {
           const levelRoiPct = levelROIPercentages[child.level - 1] || 0;
           const levelRoiCommission = (actualChildRoi * levelRoiPct) / 10000;
-          
+
           if (levelRoiCommission > 0) {
             const isClaimed = child.node && child.node.lastUpdateROI ? (matchTime <= child.node.lastUpdateROI) : false;
             list.push({
@@ -1473,14 +1473,14 @@ export default function Dashboard() {
       const streamStart = bonus.startTime;
       const streamEnd = Math.min(now, bonus.endTime);
       const streamDays = Math.floor((streamEnd - streamStart) / PERF_ONE_DAY_SECS);
-      
+
       for (let day = 1; day <= streamDays; day++) {
         const salaryTime = streamStart + day * PERF_ONE_DAY_SECS;
-        
+
         // Cap by the 400% Network Cap
         const activeDeposit = getActiveDepositAtTime(salaryTime);
         const maxNetworkCap = activeDeposit * 4.0;
-        
+
         let salaryAmt = bonus.dailyRate;
         if (sponsorCumulativeTotalEarned >= maxNetworkCap) {
           salaryAmt = 0;
@@ -1488,7 +1488,7 @@ export default function Dashboard() {
           salaryAmt = maxNetworkCap - sponsorCumulativeTotalEarned;
         }
         sponsorCumulativeTotalEarned += salaryAmt;
-        
+
         if (salaryAmt > 0) {
           list.push({
             type: "perf_daily",
@@ -1523,10 +1523,10 @@ export default function Dashboard() {
       const provider = new ethers.BrowserProvider(window.ethereum);
       const signer = await provider.getSigner();
       const usdtContract = new ethers.Contract(usdtAddress, USDT_ABI, signer);
-      
+
       const tx = await usdtContract.mint(walletAddress, ethers.parseUnits("500", 18));
       await tx.wait();
-      
+
       alert("500 Test USDT minted to your wallet!");
       await loadBlockchainData(walletAddress);
     } catch (err) {
@@ -1538,7 +1538,7 @@ export default function Dashboard() {
 
   // Helper to handle transaction errors cleanly (especially user rejection & custom reverts)
   function handleTxError(err, defaultMsg) {
-    const isUserRejection = 
+    const isUserRejection =
       err.code === "ACTION_REJECTED" ||
       err.code === 4001 ||
       err.message?.toLowerCase().includes("user rejected") ||
@@ -1569,9 +1569,9 @@ export default function Dashboard() {
     // Inspect error message text for standard require revert strings
     const errMsg = err.message?.toLowerCase() || "";
     if (
-      err.code === "CALL_EXCEPTION" || 
-      errMsg.includes("reverted") || 
-      errMsg.includes("revert") || 
+      err.code === "CALL_EXCEPTION" ||
+      errMsg.includes("reverted") ||
+      errMsg.includes("revert") ||
       errMsg.includes("exception")
     ) {
       if (errMsg.includes("below minimum deposit")) {
@@ -1590,7 +1590,7 @@ export default function Dashboard() {
         alert("Transaction Failed: Insufficient USDT balance in your wallet.");
         return;
       }
-      
+
       alert(`Transaction Failed: The blockchain transaction reverted. Verify your wallet balance & allowance, then try again.`);
       return;
     }
@@ -1622,7 +1622,7 @@ export default function Dashboard() {
       setLoading(true);
       const provider = new ethers.BrowserProvider(window.ethereum);
       const signer = await provider.getSigner();
-      
+
       const usdtContract = new ethers.Contract(usdtAddress, USDT_ABI, signer);
       const dtContract = new ethers.Contract(dtInfinityAddress, DT_INFINITY_ABI, signer);
 
@@ -1665,9 +1665,9 @@ export default function Dashboard() {
       return;
     }
 
-    const available = parseFloat(userData.claimableBalance) + 
-      parseFloat(pendingBalances.pendingDaily) + 
-      parseFloat(pendingBalances.pendingBooster) + 
+    const available = parseFloat(userData.claimableBalance) +
+      parseFloat(pendingBalances.pendingDaily) +
+      parseFloat(pendingBalances.pendingBooster) +
       parseFloat(pendingBalances.pendingPerf);
 
     if (available <= 0) {
@@ -1707,9 +1707,9 @@ export default function Dashboard() {
       alert("Please connect wallet first");
       return;
     }
-    const available = parseFloat(userData.claimableBalance) + 
-      parseFloat(pendingBalances.pendingDaily) + 
-      parseFloat(pendingBalances.pendingBooster) + 
+    const available = parseFloat(userData.claimableBalance) +
+      parseFloat(pendingBalances.pendingDaily) +
+      parseFloat(pendingBalances.pendingBooster) +
       parseFloat(pendingBalances.pendingPerf);
 
     if (available <= 0) {
@@ -1851,10 +1851,10 @@ export default function Dashboard() {
   // Calculate Cumulative Lifetime Business Volume (sum of all downline deposits)
   const lifetimeTeamVolume = useMemo(() => {
     if (!walletConnected || !isRegistered || !walletAddress || !dbTreeNodes) return 0;
-    
+
     let sum = 0;
     const rootLower = walletAddress.toLowerCase();
-    
+
     Object.keys(dbTreeNodes).forEach(addr => {
       if (addr.toLowerCase() === rootLower) return;
       const node = dbTreeNodes[addr];
@@ -1909,9 +1909,9 @@ export default function Dashboard() {
 
       // 2. Combine with onChainEvents, filtering out simulated duplicates
       const simulatedFiltered = simulatedTxs.filter(sim => {
-        const isDuplicate = onChainEvents.some(onChain => 
-          onChain.type === sim.type && 
-          onChain.fromUser.toLowerCase() === sim.fromUser.toLowerCase() && 
+        const isDuplicate = onChainEvents.some(onChain =>
+          onChain.type === sim.type &&
+          onChain.fromUser.toLowerCase() === sim.fromUser.toLowerCase() &&
           Math.abs(onChain.timestamp - sim.timestamp) < 60
         );
         return !isDuplicate;
@@ -1990,13 +1990,13 @@ export default function Dashboard() {
         if (tx.type === "performance" && tx.typeName.includes("Achieved")) {
           return tx;
         }
-        
+
         const maxNetwork = runningDeposit * 4;
         const maxROI = runningDeposit * 2.2;
-        
+
         const allowedNetwork = Math.max(0, maxNetwork - runningTotalEarned);
         let allowed = tx.amount;
-        
+
         if (!tx.isSimulated) {
           if (tx.type === "roi" || tx.type === "booster_roi") {
             runningROIEarned += allowed;
@@ -2004,7 +2004,7 @@ export default function Dashboard() {
           runningTotalEarned += allowed;
           return tx;
         }
-        
+
         if (tx.type === "roi" || tx.type === "booster_roi") {
           const allowedROI = Math.max(0, maxROI - runningTotalEarned);
           allowed = Math.min(tx.amount, allowedNetwork, allowedROI);
@@ -2012,9 +2012,9 @@ export default function Dashboard() {
         } else {
           allowed = Math.min(tx.amount, allowedNetwork);
         }
-        
+
         runningTotalEarned += allowed;
-        
+
         return {
           ...tx,
           amount: allowed
@@ -2035,21 +2035,21 @@ export default function Dashboard() {
     if (userData.totalDeposits > 0 && userData.lastUpdateROI > 0) {
       const elapsed = Math.max(0, now - Number(userData.lastUpdateROI));
       const pendingDays = Math.floor(elapsed / ONE_DAY_SECS);
-      
+
       const totalDepositsNum = safeFloat(userData.totalDeposits);
       const rate = safeFloat(userData.boosterRate) || 0.5; // percent
-      
+
       const maxRoiLimit = totalDepositsNum * 2.2;
       const maxNetworkLimit = totalDepositsNum * 4.0;
-      
+
       let runningTotalEarned = totalEarnedBeforePending;
-      
+
       for (let day = 1; day <= pendingDays; day++) {
         const payoutTime = Number(userData.lastUpdateROI) + day * ONE_DAY_SECS;
         const dailyRoiRate = totalDepositsNum * 0.005;
         const boosterRoiRate = totalDepositsNum * Math.max(0, (rate / 100) - 0.005);
         let pending = dailyRoiRate + boosterRoiRate;
-        
+
         // Enforce 220% ROI Cap
         if (runningTotalEarned >= maxRoiLimit) {
           pending = 0;
@@ -2098,16 +2098,16 @@ export default function Dashboard() {
         const pendingDays = Math.floor((end - start) / PERF_ONE_DAY_SECS);
         for (let day = 1; day <= pendingDays; day++) {
           const salaryTime = start + day * PERF_ONE_DAY_SECS;
-          
+
           let salaryAmt = bonus.dailyRate;
-          
+
           // Enforce 400% Network Cap
           if (runningTotalEarnedForPerf >= maxNetworkLimit) {
             salaryAmt = 0;
           } else if (runningTotalEarnedForPerf + salaryAmt > maxNetworkLimit) {
             salaryAmt = maxNetworkLimit - runningTotalEarnedForPerf;
           }
-          
+
           if (salaryAmt > 0) {
             runningTotalEarnedForPerf += salaryAmt;
             const salarySettled = baseTxs.some(t => t.type === "perf_daily" && Math.abs(t.timestamp - salaryTime) < 30);
@@ -2237,11 +2237,11 @@ export default function Dashboard() {
   // Calculate lifetime business value (sum of deposits of all downline referrals)
   const lifetimeBusinessValue = useMemo(() => {
     if (!walletAddress || !treeNodes) return 0;
-    
+
     let total = 0;
     const visited = new Set();
     const queue = [];
-    
+
     const rootNode = treeNodes[walletAddress.toLowerCase()];
     if (rootNode && rootNode.children) {
       rootNode.children.forEach(child => {
@@ -2252,7 +2252,7 @@ export default function Dashboard() {
         }
       });
     }
-    
+
     while (queue.length > 0) {
       const currentAddr = queue.shift();
       const node = treeNodes[currentAddr];
@@ -2269,7 +2269,7 @@ export default function Dashboard() {
         }
       }
     }
-    
+
     return total;
   }, [walletAddress, treeNodes]);
 
@@ -2324,9 +2324,9 @@ export default function Dashboard() {
     const displayPerfTotal = perfDaily + perfInstant;
 
     const totalEarned = displayDailyTotal + displayBoosterTotal + levelIncome + displayLevelRoiTotal + displayPerfTotal;
-    const totalAvailable = parseFloat(userData.claimableBalance) + 
-      displayPendingDaily + 
-      displayPendingBooster + 
+    const totalAvailable = parseFloat(userData.claimableBalance) +
+      displayPendingDaily +
+      displayPendingBooster +
       displayPendingPerf;
 
     console.log("STATS_DEBUG:", {
@@ -2387,7 +2387,7 @@ export default function Dashboard() {
         if (filterType === "level_roi" && tx.type !== "level_roi") return false;
         if (filterType === "performance" && !["perf_instant", "perf_daily", "perf_claim"].includes(tx.type)) return false;
       }
-      
+
       // 2. Filter Level (Dropdown)
       if (filterLevel !== "all" && tx.level.toString() !== filterLevel) {
         return false;
@@ -2452,7 +2452,7 @@ export default function Dashboard() {
 
     return (
       <div className="tree-branch-wrapper">
-        <div 
+        <div
           className={`tree-node-card ${isSelected ? 'selected' : ''} ${isExpanded ? 'expanded' : 'collapsed'}`}
           onClick={handleNodeClick}
         >
@@ -2489,21 +2489,21 @@ export default function Dashboard() {
             <img src="/logo.png" alt="DT Infinity Logo" style={{ height: "56px", objectFit: "contain", marginBottom: "16px" }} />
             <p className="connect-subtitle" style={{ color: "var(--down)", fontWeight: "600", fontSize: "14px", textTransform: "uppercase", letterSpacing: "1px" }}>Wrong Network</p>
           </div>
-          
+
           <div className="connect-divider"></div>
-          
+
           <div className="connect-body">
             <p className="connect-message">
-              Your wallet is connected to <strong style={{ color: "var(--text)" }}>{networkName}</strong>. 
+              Your wallet is connected to <strong style={{ color: "var(--text)" }}>{networkName}</strong>.
               However, this platform is configured to run on <strong style={{ color: "var(--blue-bright)" }}>{targetChainId === 97n ? "BSC Testnet" : "BSC Mainnet"}</strong>.
             </p>
-            
+
             <button className="connect-btn display" style={{ background: "var(--down)", color: "#fff", boxShadow: "0 4px 12px rgba(242, 112, 94, 0.25)" }} onClick={switchNetwork} disabled={loading}>
               {loading ? "Switching Network..." : `Switch to ${targetChainId === 97n ? "BSC Testnet" : "BSC Mainnet"}`}
             </button>
-            
-            <button 
-              className="copy-btn" 
+
+            <button
+              className="copy-btn"
               style={{ width: "100%", padding: "10px", marginTop: "10px", background: "transparent", color: "var(--text-muted)", border: "1px solid var(--border)" }}
               onClick={() => {
                 setWalletConnected(false);
@@ -2526,11 +2526,11 @@ export default function Dashboard() {
             <img src="/logo.png" alt="DT Infinity Logo" style={{ height: "56px", objectFit: "contain", marginBottom: "16px" }} />
             <p className="connect-subtitle" style={{ color: "var(--blue-bright)", fontWeight: "600", fontSize: "14px", textTransform: "uppercase", letterSpacing: "1.5px" }}>Join Platform</p>
           </div>
-          
+
           <div className="connect-divider"></div>
-          
+
           <div className="connect-body" style={{ textAlign: "left" }}>
-            <div style={{ 
+            <div style={{
               background: "rgba(94, 200, 242, 0.08)",
               border: "1px solid var(--border)",
               borderRadius: "10px",
@@ -2542,23 +2542,23 @@ export default function Dashboard() {
             }}>
               <strong style={{ color: "var(--blue-bright)" }}>Registration Required:</strong> To activate your node and participate in the Daily ROI & MLM Network, please enter your sponsor&apos;s address and execute your initial deposit (min 10 USDT).
             </div>
-            
+
             <form onSubmit={handleDeposit} style={{ display: "flex", flexDirection: "column", gap: "15px" }}>
               <div className="field">
                 <label style={{ fontSize: "11.5px", textTransform: "uppercase", color: "var(--text-muted)", display: "block", marginBottom: "6px" }}>Your Wallet Address</label>
-                <input 
-                  type="text" 
-                  value={walletAddress} 
-                  disabled 
+                <input
+                  type="text"
+                  value={walletAddress}
+                  disabled
                   style={{ width: "100%", background: "var(--surface-2)", border: "1px solid var(--border)", borderRadius: "10px", padding: "12px 14px", color: "var(--text-muted)", fontSize: "13px" }}
                 />
               </div>
 
               <div className="field">
                 <label style={{ fontSize: "11.5px", textTransform: "uppercase", color: "var(--text-muted)", display: "block", marginBottom: "6px" }}>Sponsor / Referrer Address</label>
-                <input 
-                  type="text" 
-                  placeholder="0x..." 
+                <input
+                  type="text"
+                  placeholder="0x..."
                   value={sponsorAddress}
                   onChange={(e) => setSponsorAddress(e.target.value)}
                   required
@@ -2569,9 +2569,9 @@ export default function Dashboard() {
               <div className="field">
                 <label style={{ fontSize: "11.5px", textTransform: "uppercase", color: "var(--text-muted)", display: "block", marginBottom: "6px" }}>Deposit Amount (Min 10 USDT)</label>
                 <div style={{ position: "relative" }}>
-                  <input 
-                    type="number" 
-                    placeholder="10" 
+                  <input
+                    type="number"
+                    placeholder="10"
                     value={depositAmount}
                     onChange={(e) => setDepositAmount(e.target.value)}
                     required
@@ -2586,8 +2586,8 @@ export default function Dashboard() {
               </button>
             </form>
 
-            <button 
-              className="copy-btn" 
+            <button
+              className="copy-btn"
               style={{ width: "100%", padding: "10px", background: "transparent", color: "var(--text-muted)", border: "1px solid var(--border)" }}
               onClick={() => {
                 setWalletConnected(false);
@@ -2610,18 +2610,18 @@ export default function Dashboard() {
             <img src="/logo.png" alt="DT Infinity Logo" style={{ height: "56px", objectFit: "contain", marginBottom: "16px" }} />
             <p className="connect-subtitle">Decentralized MLM Network & ROI Platform</p>
           </div>
-          
+
           <div className="connect-divider"></div>
-          
+
           <div className="connect-body">
             <p className="connect-message">
               Please connect your Web3 crypto wallet (such as MetaMask or Trust Wallet) to access your decentralized dashboard, track downline network volume, and claim rewards.
             </p>
-            
+
             <button className="connect-btn display" onClick={connectWallet} disabled={loading}>
               {loading ? "Connecting Wallet..." : "Connect Wallet"}
             </button>
-            
+
             <div className="connect-badge">
               <span className="badge-dot"></span>
               BEP-20 · BNB Chain Supported
@@ -2636,8 +2636,8 @@ export default function Dashboard() {
     <div className="shell">
       {/* SIDEBAR OVERLAY FOR MOBILE */}
       {sidebarOpen && (
-        <div 
-          className="sidebar-overlay" 
+        <div
+          className="sidebar-overlay"
           onClick={() => setSidebarOpen(false)}
           style={{
             position: "fixed",
@@ -2648,14 +2648,14 @@ export default function Dashboard() {
           }}
         />
       )}
-      
+
       {/* SIDEBAR */}
       <aside className={`sidebar ${sidebarOpen ? "open" : ""}`} style={{ zIndex: 20 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div className="brand" style={{ padding: "0" }}>
             <img src="/logo.png" alt="DT Infinity Logo" style={{ height: "36px", objectFit: "contain" }} />
           </div>
-          <button 
+          <button
             className="mobile-close-btn"
             onClick={() => setSidebarOpen(false)}
             style={{
@@ -2668,91 +2668,91 @@ export default function Dashboard() {
             }}
           >
             <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2">
-              <line x1="18" y1="6" x2="6" y2="18"/>
-              <line x1="6" y1="6" x2="18" y2="18"/>
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
             </svg>
           </button>
         </div>
 
         <nav className="nav">
           <div className="nav-label">Overview</div>
-          <button 
-            className={`nav-item ${activeView === "dashboard" ? "active" : ""}`} 
+          <button
+            className={`nav-item ${activeView === "dashboard" ? "active" : ""}`}
             onClick={() => { setActiveView("dashboard"); setSidebarOpen(false); }}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-              <rect x="3" y="3" width="7" height="9" rx="1.5"/>
-              <rect x="14" y="3" width="7" height="5" rx="1.5"/>
-              <rect x="14" y="12" width="7" height="9" rx="1.5"/>
-              <rect x="3" y="16" width="7" height="5" rx="1.5"/>
+              <rect x="3" y="3" width="7" height="9" rx="1.5" />
+              <rect x="14" y="3" width="7" height="5" rx="1.5" />
+              <rect x="14" y="12" width="7" height="9" rx="1.5" />
+              <rect x="3" y="16" width="7" height="5" rx="1.5" />
             </svg>
             Dashboard
           </button>
-          <button 
-            className={`nav-item ${activeView === "network" ? "active" : ""}`} 
+          <button
+            className={`nav-item ${activeView === "network" ? "active" : ""}`}
             onClick={() => { setActiveView("network"); setSidebarOpen(false); }}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-              <circle cx="12" cy="5" r="2.2"/>
-              <circle cx="5" cy="18" r="2.2"/>
-              <circle cx="19" cy="18" r="2.2"/>
-              <path d="M12 7.2v4M12 11.2 6.3 16.3M12 11.2l5.7 5.1"/>
+              <circle cx="12" cy="5" r="2.2" />
+              <circle cx="5" cy="18" r="2.2" />
+              <circle cx="19" cy="18" r="2.2" />
+              <path d="M12 7.2v4M12 11.2 6.3 16.3M12 11.2l5.7 5.1" />
             </svg>
             My Network
           </button>
-          <button 
-            className={`nav-item ${activeView === "history" ? "active" : ""}`} 
+          <button
+            className={`nav-item ${activeView === "history" ? "active" : ""}`}
             onClick={() => { setActiveView("history"); setSidebarOpen(false); }}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-              <circle cx="12" cy="12" r="8.5"/>
-              <path d="M12 7.5V12l3 2"/>
+              <circle cx="12" cy="12" r="8.5" />
+              <path d="M12 7.5V12l3 2" />
             </svg>
             Income History
           </button>
-          
+
           <div className="nav-label">Funds</div>
-          <button 
-            className={`nav-item ${activeView === "deposit" ? "active" : ""}`} 
+          <button
+            className={`nav-item ${activeView === "deposit" ? "active" : ""}`}
             onClick={() => { setActiveView("deposit"); setSidebarOpen(false); }}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-              <path d="M12 4v16M4 12h16"/>
+              <path d="M12 4v16M4 12h16" />
             </svg>
             New Deposit
           </button>
-          <button 
-            className={`nav-item ${activeView === "withdraw" ? "active" : ""}`} 
+          <button
+            className={`nav-item ${activeView === "withdraw" ? "active" : ""}`}
             onClick={() => { setActiveView("withdraw"); setSidebarOpen(false); }}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-              <rect x="2.5" y="6" width="19" height="13" rx="2"/>
-              <path d="M2.5 10h19M6 15h4"/>
+              <rect x="2.5" y="6" width="19" height="13" rx="2" />
+              <path d="M2.5 10h19M6 15h4" />
             </svg>
             Withdraw
           </button>
-          
+
           <div className="nav-label">Account</div>
-          <button 
-            className={`nav-item ${activeView === "profile" ? "active" : ""}`} 
+          <button
+            className={`nav-item ${activeView === "profile" ? "active" : ""}`}
             onClick={() => { setActiveView("profile"); setSidebarOpen(false); }}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-              <circle cx="12" cy="8" r="3.3"/>
-              <path d="M4.5 20c1.6-3.6 5-5.5 7.5-5.5s5.9 1.9 7.5 5.5"/>
+              <circle cx="12" cy="8" r="3.3" />
+              <path d="M4.5 20c1.6-3.6 5-5.5 7.5-5.5s5.9 1.9 7.5 5.5" />
             </svg>
             Profile
           </button>
-          <button 
-            className={`nav-item ${activeView === "reports" ? "active" : ""}`} 
+          <button
+            className={`nav-item ${activeView === "reports" ? "active" : ""}`}
             onClick={() => { setActiveView("reports"); setSidebarOpen(false); }}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-              <polyline points="14 2 14 8 20 8"/>
-              <line x1="16" y1="13" x2="8" y2="13"/>
-              <line x1="16" y1="17" x2="8" y2="17"/>
-              <polyline points="10 9 9 9 8 9"/>
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+              <polyline points="14 2 14 8 20 8" />
+              <line x1="16" y1="13" x2="8" y2="13" />
+              <line x1="16" y1="17" x2="8" y2="17" />
+              <polyline points="10 9 9 9 8 9" />
             </svg>
             Reports
           </button>
@@ -2770,8 +2770,8 @@ export default function Dashboard() {
       <main className="main">
         <div className="topbar">
           <div className="topbar-left">
-            <button 
-              className="mobile-menu-btn" 
+            <button
+              className="mobile-menu-btn"
               onClick={() => setSidebarOpen(true)}
               style={{
                 display: "none",
@@ -2783,9 +2783,9 @@ export default function Dashboard() {
               }}
             >
               <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                <line x1="4" y1="12" x2="20" y2="12"/>
-                <line x1="4" y1="6" x2="20" y2="6"/>
-                <line x1="4" y1="18" x2="20" y2="18"/>
+                <line x1="4" y1="12" x2="20" y2="12" />
+                <line x1="4" y1="6" x2="20" y2="6" />
+                <line x1="4" y1="18" x2="20" y2="18" />
               </svg>
             </button>
             <div className="brand" style={{ display: "none" }}>
@@ -2808,11 +2808,11 @@ export default function Dashboard() {
           </div>
 
           <div className="wallet-box" style={{ gap: "15px" }}>
-            <div 
-              className="wallet-dot" 
-              style={{ 
-                background: walletConnected ? "var(--up)" : "var(--text-faint)", 
-                boxShadow: walletConnected ? "0 0 8px var(--up)" : "none" 
+            <div
+              className="wallet-dot"
+              style={{
+                background: walletConnected ? "var(--up)" : "var(--text-faint)",
+                boxShadow: walletConnected ? "0 0 8px var(--up)" : "none"
               }}
             />
             <div>
@@ -2820,13 +2820,13 @@ export default function Dashboard() {
               <div className="net">{networkName}</div>
             </div>
             {walletConnected ? (
-              <button 
+              <button
                 onClick={() => {
                   setWalletConnected(false);
                   setIsWrongNetwork(false);
                   setWalletAddress("");
-                }} 
-                className="copy-btn" 
+                }}
+                className="copy-btn"
                 style={{ padding: "8px 12px", fontSize: "11px", fontWeight: "600", border: "1px solid var(--border)" }}
               >
                 Disconnect
@@ -2871,9 +2871,9 @@ export default function Dashboard() {
               <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
                 <div style={{ background: "rgba(94, 200, 242, 0.2)", borderRadius: "50%", padding: "8px", display: "flex", alignItems: "center", justifyContent: "center" }}>
                   <svg viewBox="0 0 24 24" fill="none" stroke="var(--blue-bright)" strokeWidth="2.5" strokeLinecap="round" style={{ width: "22px", height: "22px" }}>
-                    <circle cx="12" cy="12" r="10"/>
-                    <path d="M12 8v4"/>
-                    <path d="M12 16h.01"/>
+                    <circle cx="12" cy="12" r="10" />
+                    <path d="M12 8v4" />
+                    <path d="M12 16h.01" />
                   </svg>
                 </div>
                 <div>
@@ -2922,8 +2922,8 @@ export default function Dashboard() {
                         <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                           <div style={{ fontSize: "12px", color: "var(--up)", display: "flex", alignItems: "center", gap: "6px", fontWeight: "600" }}>
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ width: "16px", height: "16px" }}>
-                              <circle cx="12" cy="12" r="10"/>
-                              <path d="M12 6v6l4 2"/>
+                              <circle cx="12" cy="12" r="10" />
+                              <path d="M12 6v6l4 2" />
                             </svg>
                             Claim Window Closes In: <span className="mono" style={{ color: "#fff", background: "rgba(16, 185, 129, 0.15)", padding: "2px 6px", borderRadius: "4px" }}>{formatCountdown(timeLeft)}</span>
                           </div>
@@ -2964,8 +2964,8 @@ export default function Dashboard() {
                         <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
                           <div style={{ fontSize: "12.5px", color: "var(--orange)", display: "flex", alignItems: "center", gap: "5px", fontWeight: "600" }}>
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: "16px", height: "16px" }}>
-                              <circle cx="12" cy="12" r="10"/>
-                              <path d="M12 6v6l4 2"/>
+                              <circle cx="12" cy="12" r="10" />
+                              <path d="M12 6v6l4 2" />
                             </svg>
                             Claim window will activate on {claimDateStr} for 24 hours only.
                           </div>
@@ -2991,7 +2991,7 @@ export default function Dashboard() {
                 <div className="sub">Across all income streams · live updates</div>
               </div>
             </div>
-            
+
             <div className="card mini-card">
               <div className="k">Total Deposit</div>
               <div className="big mono">{userData.totalDeposits}</div>
@@ -3057,7 +3057,7 @@ export default function Dashboard() {
             <div className="income-card">
               <div className="icon">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                  <path d="M4 18l5-6 4 4 7-9"/>
+                  <path d="M4 18l5-6 4 4 7-9" />
                 </svg>
               </div>
               <div className="name">Daily ROI</div>
@@ -3070,10 +3070,10 @@ export default function Dashboard() {
             <div className="income-card">
               <div className="icon">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                  <circle cx="12" cy="5" r="2"/>
-                  <circle cx="5" cy="19" r="2"/>
-                  <circle cx="19" cy="19" r="2"/>
-                  <path d="M12 7v5M12 12L6 17M12 12l6 5"/>
+                  <circle cx="12" cy="5" r="2" />
+                  <circle cx="5" cy="19" r="2" />
+                  <circle cx="19" cy="19" r="2" />
+                  <path d="M12 7v5M12 12L6 17M12 12l6 5" />
                 </svg>
               </div>
               <div className="name">Level Income</div>
@@ -3084,7 +3084,7 @@ export default function Dashboard() {
             <div className="income-card">
               <div className="icon">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                  <path d="M4 4v16h16M8 15l3-3 3 2 5-6"/>
+                  <path d="M4 4v16h16M8 15l3-3 3 2 5-6" />
                 </svg>
               </div>
               <div className="name">Level ROI</div>
@@ -3095,7 +3095,7 @@ export default function Dashboard() {
             <div className="income-card">
               <div className="icon">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                  <path d="M12 3l7 4v5c0 5-3.5 7.5-7 9-3.5-1.5-7-4-7-9V7z"/>
+                  <path d="M12 3l7 4v5c0 5-3.5 7.5-7 9-3.5-1.5-7-4-7-9V7z" />
                 </svg>
               </div>
               <div className="name">Performance Bonus</div>
@@ -3149,7 +3149,7 @@ export default function Dashboard() {
                             Rate: <span className="mono" style={{ color: "var(--up)", fontWeight: "600" }}>+{bonus.dailyRate} USDT/day</span>
                           </div>
                         </div>
-                        
+
                         <div className="mono" style={{ textAlign: "right", fontSize: "12px", color: "var(--text-muted)" }}>
                           Time Left: <span style={{ color: "#fff", background: "rgba(255,255,255,0.06)", padding: "4px 8px", borderRadius: "4px", fontWeight: "600" }}>{formatCountdown(timeLeftStream)}</span>
                         </div>
@@ -3205,7 +3205,7 @@ export default function Dashboard() {
               </div>
               <div className="ref-link">
                 <span className="addr">
-                  {walletConnected 
+                  {walletConnected
                     ? `${origin}/?ref=${walletAddress}`
                     : "Connect wallet to see referral link"}
                 </span>
@@ -3224,8 +3224,8 @@ export default function Dashboard() {
                   <div className="section-title" style={{ marginTop: 0 }}>Recent Transactions</div>
                   {nonZeroTxs.length === 0 ? (
                     <div style={{ color: "var(--text-muted)", fontSize: "13px", padding: "10px 0" }}>
-                      {walletConnected 
-                        ? "No recent transaction history found." 
+                      {walletConnected
+                        ? "No recent transaction history found."
                         : "Please connect wallet to view your on-chain transaction history."}
                     </div>
                   ) : (
@@ -3285,7 +3285,7 @@ export default function Dashboard() {
               <p style={{ color: "var(--text-muted)", fontSize: "12px", marginBottom: "20px" }}>
                 Explore your hierarchical MLM tree. Click any node to load and expand its direct referrals. Click the crown icon to inspect the root.
               </p>
-              
+
               <div className="tree-canvas-container">
                 {treeRoot ? (
                   <div className="tree-inner-container">
@@ -3296,7 +3296,7 @@ export default function Dashboard() {
                 )}
               </div>
             </div>
-            
+
             <div className="card">
               <div className="section-title" style={{ marginTop: 0 }}>Node Details Inspector</div>
               {selectedNode && treeNodes[selectedNode.toLowerCase()] ? (
@@ -3305,7 +3305,7 @@ export default function Dashboard() {
                   const strongVol = parseFloat(inspected.strongestLegVolume);
                   const totalVol = parseFloat(inspected.totalTeamVolume);
                   const otherVol = totalVol - strongVol;
-                  
+
                   return (
                     <div style={{ display: "flex", flexDirection: "column", gap: "15px" }}>
                       <div className="team-stat" style={{ paddingBottom: "10px", borderBottom: "1px solid var(--border)" }}>
@@ -3314,7 +3314,7 @@ export default function Dashboard() {
                           {inspected.address}
                         </div>
                       </div>
-                      
+
                       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
                         <div>
                           <div className="k" style={{ fontSize: "10.5px", color: "var(--text-muted)" }}>Deposits</div>
@@ -3528,18 +3528,18 @@ export default function Dashboard() {
                         minute: '2-digit'
                       });
                       const isNegative = tx.type === "withdraw";
-                      
+
                       return (
                         <tr key={idx} style={{ borderBottom: "1px solid var(--border)" }}>
                           <td style={{ padding: "12px 10px", fontSize: "13px" }} className="mono">{(currentPage - 1) * itemsPerPage + idx + 1}</td>
                           <td style={{ padding: "12px 10px", fontSize: "13px" }}>
                             <span className={
                               tx.type === "deposit" ? "tag roi" :
-                              tx.type === "withdraw" ? "tag bonus" :
-                              tx.type === "level_income" ? "tag level" :
-                              tx.type === "level_roi" ? "tag level" :
-                              tx.type === "roi" ? "tag roi" :
-                              "tag bonus"
+                                tx.type === "withdraw" ? "tag bonus" :
+                                  tx.type === "level_income" ? "tag level" :
+                                    tx.type === "level_roi" ? "tag level" :
+                                      tx.type === "roi" ? "tag roi" :
+                                        "tag bonus"
                             }>
                               {tx.typeName}
                             </span>
@@ -3578,7 +3578,7 @@ export default function Dashboard() {
                 </table>
               )}
             </div>
-            
+
             {/* Pagination Controls */}
             {filteredTxs.length > 0 && (
               <div style={{
@@ -3610,7 +3610,7 @@ export default function Dashboard() {
                   >
                     Previous
                   </button>
-                  
+
                   {/* Page numbers */}
                   {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
                     let pageNum = 1;
@@ -3669,9 +3669,9 @@ export default function Dashboard() {
         <div className={`view ${activeView === "deposit" ? "active" : ""}`}>
           <div className="card">
             <div className="section-title" style={{ marginTop: 0 }}>Deposit USDT Package</div>
-            
+
             {!isRegistered && (
-              <div style={{ 
+              <div style={{
                 background: "rgba(94, 200, 242, 0.08)",
                 border: "1px solid var(--border)",
                 borderRadius: "10px",
@@ -3689,21 +3689,21 @@ export default function Dashboard() {
                 {!isRegistered && (
                   <div className="field">
                     <label>Sponsor / Upline Wallet Address</label>
-                    <input 
-                      type="text" 
-                      placeholder="0x..." 
+                    <input
+                      type="text"
+                      placeholder="0x..."
                       value={sponsorAddress}
                       onChange={(e) => setSponsorAddress(e.target.value)}
                       required
                     />
                   </div>
                 )}
-                
+
                 <div className="field">
                   <label>Amount (USDT)</label>
-                  <input 
-                    type="number" 
-                    placeholder="Min 10 USDT" 
+                  <input
+                    type="number"
+                    placeholder="Min 10 USDT"
                     value={depositAmount}
                     onChange={(e) => setDepositAmount(e.target.value)}
                     min="10"
@@ -3719,7 +3719,7 @@ export default function Dashboard() {
               <div className="avail-box">
                 <div className="k">USDT Balance in Wallet</div>
                 <div className="v mono">{walletUSDTBalance} USDT</div>
-                
+
                 <div className="note" style={{ marginTop: "15px" }}>
                   Minimum deposit is 10 USDT. A package activation requires a one-time USDT approval signature.
                   {isRegistered && (
@@ -3730,9 +3730,9 @@ export default function Dashboard() {
                 </div>
 
                 {/* Developer Token Mint helper */}
-                <button 
-                  onClick={handleMintUSDT} 
-                  className="copy-btn" 
+                <button
+                  onClick={handleMintUSDT}
+                  className="copy-btn"
                   style={{ width: "100%", padding: "10px", marginTop: "20px" }}
                   disabled={!walletConnected || loading}
                 >
@@ -3751,9 +3751,9 @@ export default function Dashboard() {
               <form onSubmit={handleWithdraw}>
                 <div className="field">
                   <label>Receiving Wallet Address (Auto-sets to yours)</label>
-                  <input 
-                    type="text" 
-                    value={withdrawAddressInput} 
+                  <input
+                    type="text"
+                    value={withdrawAddressInput}
                     onChange={(e) => setWithdrawAddressInput(e.target.value)}
                     disabled
                   />
@@ -3762,7 +3762,7 @@ export default function Dashboard() {
                   </span>
                 </div>
                 <button type="submit" className="withdraw-btn" disabled={!walletConnected || loading || parseFloat(totalAvailableBalance) <= 0}>
-                  Request Full Withdrawal ({totalAvailableBalance} USDT)
+                  Request Withdrawal ({totalAvailableBalance} USDT)
                 </button>
               </form>
 
@@ -3789,8 +3789,8 @@ export default function Dashboard() {
               <div className="team-stat">
                 <div className="k">Registration Date</div>
                 <div className="v" style={{ fontSize: "14px" }}>
-                  {userData.registrationTime > 0 
-                    ? new Date(userData.registrationTime * 1000).toLocaleString() 
+                  {userData.registrationTime > 0
+                    ? new Date(userData.registrationTime * 1000).toLocaleString()
                     : "Not Registered"}
                 </div>
               </div>
@@ -3838,9 +3838,9 @@ export default function Dashboard() {
                           {strongVol.toFixed(0)} / {tier.target} | {otherVol.toFixed(0)} / {tier.target}
                         </td>
                         <td>
-                          <span 
-                            className="tag" 
-                            style={{ 
+                          <span
+                            className="tag"
+                            style={{
                               background: achieved ? "rgba(95,227,168,0.12)" : "rgba(242,112,94,0.12)",
                               color: achieved ? "var(--up)" : "var(--down)"
                             }}
@@ -3988,7 +3988,7 @@ export default function Dashboard() {
           {/* Export Action Card */}
           <div className="card" style={{ padding: "24px" }}>
             <div className="section-title" style={{ marginTop: 0 }}>Export Summary</div>
-            
+
             <div className="team-stats" style={{ marginBottom: "24px" }}>
               <div className="team-stat">
                 <div className="k">Matching Records Found</div>
@@ -4022,9 +4022,9 @@ export default function Dashboard() {
                 disabled={filteredReportsTxs.length === 0}
               >
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                  <polyline points="7 10 12 15 17 10"/>
-                  <line x1="12" y1="15" x2="12" y2="3"/>
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="7 10 12 15 17 10" />
+                  <line x1="12" y1="15" x2="12" y2="3" />
                 </svg>
                 Export CSV Report
               </button>
@@ -4048,9 +4048,9 @@ export default function Dashboard() {
                 disabled={filteredReportsTxs.length === 0}
               >
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                  <polyline points="7 10 12 15 17 10"/>
-                  <line x1="12" y1="15" x2="12" y2="3"/>
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="7 10 12 15 17 10" />
+                  <line x1="12" y1="15" x2="12" y2="3" />
                 </svg>
                 Export JSON Report
               </button>
