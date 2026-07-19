@@ -880,8 +880,8 @@ export default function Dashboard() {
           console.warn("Could not read user deposits/withdrawals arrays", e);
         }
 
-        // Fetch PerformanceBonusClaimed events using robust public RPC endpoints loop
-        let perfClaims = [];
+        // Fetch all matching on-chain events using robust public RPC endpoints loop
+        let allOnChainEvents = [];
         const rpcUrls = [
           "https://data-seed-prebsc-1-s1.binance.org:8545",
           "https://data-seed-prebsc-2-s1.binance.org:8545",
@@ -892,55 +892,159 @@ export default function Dashboard() {
           try {
             const publicProvider = new ethers.JsonRpcProvider(url, 97, { staticNetwork: true });
             const latestBlock = Number(await publicProvider.getBlockNumber());
-            let fromBlockVal = deploymentBlock ? (isNaN(Number(deploymentBlock)) ? 0 : Number(deploymentBlock)) : 0;
+            
+            // Approximate user's registration block from registration timestamp
+            let fromBlockVal = 0;
+            try {
+              const latestBlockData = await publicProvider.getBlock(latestBlock);
+              if (latestBlockData && basicInfo && basicInfo.registrationTime) {
+                const timeDiff = Number(latestBlockData.timestamp) - Number(basicInfo.registrationTime);
+                const blockDiff = Math.ceil(timeDiff / 3);
+                fromBlockVal = Math.max(0, latestBlock - blockDiff - 5000); // 5000 block buffer (~4 hours)
+              }
+            } catch (blockErr) {
+              console.warn("Could not approximate registration block, falling back", blockErr);
+            }
 
-            // Limit search range to prevent browser freezing if block is 0 or too far back
             if (fromBlockVal === 0) {
               fromBlockVal = Math.max(0, latestBlock - 50000);
-            } else if ((latestBlock - fromBlockVal) > 200000) {
-              fromBlockVal = Math.max(0, latestBlock - 200000);
             }
 
             const dtContractPublic = new ethers.Contract(dtInfinityAddress, DT_INFINITY_ABI, publicProvider);
-            const filter = await dtContractPublic.filters.PerformanceBonusClaimed(addr);
 
-            let allEvents = [];
+            const filterLevelIncome = dtContractPublic.filters.LevelIncomePaid(addr);
+            const filterLevelROI = dtContractPublic.filters.LevelROIPaid(addr);
+            const filterPerfClaimed = dtContractPublic.filters.PerformanceBonusClaimed(addr);
+            const filterPerfDaily = dtContractPublic.filters.PerformanceDailyPaid(addr);
+            const filterROI = dtContractPublic.filters.ROIAccumulated(addr);
+            const filterBooster = dtContractPublic.filters.BoosterROIAccumulated(addr);
+
+            let rawLevelIncome = [];
+            let rawLevelROI = [];
+            let rawPerfClaimed = [];
+            let rawPerfDaily = [];
+            let rawROI = [];
+            let rawBooster = [];
+
             let currentBlock = fromBlockVal;
             while (currentBlock <= latestBlock) {
               let toBlock = Math.min(currentBlock + 4900, latestBlock);
-              const eventsChunk = await dtContractPublic.queryFilter(filter, currentBlock, toBlock);
-              if (eventsChunk) {
-                allEvents = allEvents.concat(eventsChunk);
-              }
+              
+              // Query sequentially with delay to avoid rate limits
+              const cLevelIncome = await dtContractPublic.queryFilter(filterLevelIncome, currentBlock, toBlock);
+              await new Promise(r => setTimeout(r, 60));
+              const cLevelROI = await dtContractPublic.queryFilter(filterLevelROI, currentBlock, toBlock);
+              await new Promise(r => setTimeout(r, 60));
+              const cPerfClaimed = await dtContractPublic.queryFilter(filterPerfClaimed, currentBlock, toBlock);
+              await new Promise(r => setTimeout(r, 60));
+              const cPerfDaily = await dtContractPublic.queryFilter(filterPerfDaily, currentBlock, toBlock);
+              await new Promise(r => setTimeout(r, 60));
+              const cROI = await dtContractPublic.queryFilter(filterROI, currentBlock, toBlock);
+              await new Promise(r => setTimeout(r, 60));
+              const cBooster = await dtContractPublic.queryFilter(filterBooster, currentBlock, toBlock);
+              await new Promise(r => setTimeout(r, 60));
+
+              if (cLevelIncome) rawLevelIncome = rawLevelIncome.concat(cLevelIncome);
+              if (cLevelROI) rawLevelROI = rawLevelROI.concat(cLevelROI);
+              if (cPerfClaimed) rawPerfClaimed = rawPerfClaimed.concat(cPerfClaimed);
+              if (cPerfDaily) rawPerfDaily = rawPerfDaily.concat(cPerfDaily);
+              if (cROI) rawROI = rawROI.concat(cROI);
+              if (cBooster) rawBooster = rawBooster.concat(cBooster);
+              
               currentBlock = toBlock + 1;
-            }
+            }            const mappedLevelIncome = rawLevelIncome.map((event) => ({
+              type: "level_income",
+              typeName: "Level Income",
+              fromUser: event.args.downline,
+              amount: parseFloat(ethers.formatUnits(event.args.amount || 0n, 18)),
+              level: event.args.level.toString(),
+              timestamp: Number(event.args.time || 0n),
+              status: "Completed",
+              txHash: event.transactionHash,
+              blockNumber: Number(event.blockNumber || 0)
+            }));
 
-            perfClaims = allEvents.map((event, idx) => {
-              const args = event.args;
-              const tierIdx = Number(args.tierIndex);
-              const chooseInstant = args.chooseInstant;
-              const time = Number(args.time);
+            const mappedLevelROI = rawLevelROI.map((event) => ({
+              type: "level_roi",
+              typeName: "Level ROI Matching",
+              fromUser: event.args.downline,
+              amount: parseFloat(ethers.formatUnits(event.args.amount || 0n, 18)),
+              level: event.args.level.toString(),
+              timestamp: Number(event.args.time || 0n),
+              status: "Completed",
+              txHash: event.transactionHash,
+              blockNumber: Number(event.blockNumber || 0)
+            }));
+
+            const mappedPerfClaimed = rawPerfClaimed.map((event) => {
+              const tierIdx = Number(event.args.tierIndex);
+              const chooseInstant = event.args.chooseInstant;
               const tier = PERFORMANCE_TIERS[tierIdx];
-
               return {
                 type: chooseInstant ? "perf_instant" : "perf_claim",
                 typeName: chooseInstant ? "Performance Bonus (Instant)" : "Performance Bonus Claimed",
                 fromUser: "Contract",
                 amount: chooseInstant ? tier.instant : 0,
                 level: "-",
-                timestamp: time,
+                timestamp: Number(event.args.time || 0n),
                 status: "Completed",
-                txHash: event.transactionHash || `0x_perf_claim_${addr}_${idx}`,
-                blockNumber: Number(event.blockNumber || 0)
+                txHash: event.transactionHash,
+                blockNumber: Number(event.blockNumber || 0),
+                tierIndex: tierIdx
               };
             });
+
+            const mappedPerfDaily = rawPerfDaily.map((event) => ({
+              type: "perf_daily",
+              typeName: "Performance Daily Salary",
+              fromUser: "Contract",
+              amount: parseFloat(ethers.formatUnits(event.args.amount || 0n, 18)),
+              level: "-",
+              timestamp: Number(event.args.time || 0n),
+              status: "Completed",
+              txHash: event.transactionHash,
+              blockNumber: Number(event.blockNumber || 0)
+            }));
+
+            const mappedROI = rawROI.map((event) => ({
+              type: "roi",
+              typeName: "Daily ROI Payout",
+              fromUser: "Contract",
+              amount: parseFloat(ethers.formatUnits(event.args.amount || 0n, 18)),
+              level: "-",
+              timestamp: Number(event.args.time || 0n),
+              status: "Completed",
+              txHash: event.transactionHash,
+              blockNumber: Number(event.blockNumber || 0)
+            }));
+
+            const mappedBooster = rawBooster.map((event) => ({
+              type: "booster_roi",
+              typeName: "Booster ROI Payout",
+              fromUser: "Contract",
+              amount: parseFloat(ethers.formatUnits(event.args.amount || 0n, 18)),
+              level: "-",
+              timestamp: Number(event.args.time || 0n),
+              status: "Completed",
+              txHash: event.transactionHash,
+              blockNumber: Number(event.blockNumber || 0)
+            }));
+
+            allOnChainEvents = [
+              ...mappedLevelIncome,
+              ...mappedLevelROI,
+              ...mappedPerfClaimed,
+              ...mappedPerfDaily,
+              ...mappedROI,
+              ...mappedBooster
+            ];
             break; // successfully queried events, break loop
           } catch (err) {
             console.warn(`Query logs failed on RPC ${url}, trying next...`, err);
           }
         }
 
-        setOnChainEvents([...deposits, ...withdrawals, ...perfClaims]);
+        setOnChainEvents([...deposits, ...withdrawals, ...allOnChainEvents]);
 
         // Sync everything to Convex
         try {
@@ -952,7 +1056,7 @@ export default function Dashboard() {
             directs,
             userDeposits,
             userWithdrawals,
-            perfClaims,
+            allOnChainEvents,
             sessionTxDetails
           );
         } catch (convexErr) {
@@ -1869,266 +1973,12 @@ export default function Dashboard() {
   const txs = useMemo(() => {
     if (!walletConnected || !isRegistered) return [];
 
-    console.log("TXS_MEMO_DEBUG:", {
-      dbLedgerExists: !!dbLedger,
-      dbLedgerLength: dbLedger?.length,
-      walletConnected,
-      isRegistered,
-      userData
-    });
-
     let baseTxs = [];
     if (dbLedger && dbLedger.length > 0) {
       baseTxs = [...dbLedger];
     } else {
-      // 1. Generate simulated ledger records for accumulations using current treeNodes
-      const basicInfoMock = {
-        registrationTime: BigInt(userData.registrationTime),
-        totalDeposits: ethers.parseUnits(userData.totalDeposits, 18),
-        totalWithdrawn: ethers.parseUnits(userData.totalWithdrawn, 18)
-      };
-      const incomeInfoMock = {
-        levelIncomeEarned: ethers.parseUnits(userData.levelIncomeEarned, 18),
-        levelROIEarned: ethers.parseUnits(userData.levelROIEarned, 18),
-        performanceBonusEarned: ethers.parseUnits(userData.performanceBonusEarned, 18),
-        dailyROIEarned: ethers.parseUnits(userData.dailyROIEarned, 18),
-        roiBoosterEarned: ethers.parseUnits(userData.roiBoosterEarned, 18)
-      };
-
-      const simulatedTxs = generateSimulatedLedger(
-        walletAddress,
-        basicInfoMock,
-        incomeInfoMock,
-        directsList,
-        oneDay,
-        treeNodes,
-        onChainEvents.filter(e => e.type === "deposit"),
-        perfOneDay,
-        activeBonuses
-      );
-
-      // 2. Combine with onChainEvents, filtering out simulated duplicates
-      const simulatedFiltered = simulatedTxs.filter(sim => {
-        const isDuplicate = onChainEvents.some(onChain =>
-          onChain.type === sim.type &&
-          onChain.fromUser.toLowerCase() === sim.fromUser.toLowerCase() &&
-          Math.abs(onChain.timestamp - sim.timestamp) < 60
-        );
-        return !isDuplicate;
-      });
-
-      baseTxs = [...onChainEvents, ...simulatedFiltered];
-
-      // Ensure fundamental transactions exist
-      const mockTime = userData.registrationTime;
-      const userDeposits = safeFloat(userData.totalDeposits);
-      if (userDeposits > 0) {
-        const onChainDepositsSum = baseTxs
-          .filter(t => t.type === "deposit" && t.txHash !== "0x_fallback_deposit")
-          .reduce((sum, t) => sum + t.amount, 0);
-
-        if (onChainDepositsSum < userDeposits - 0.01) {
-          baseTxs.push({
-            type: "deposit",
-            typeName: "Deposit",
-            fromUser: "Self",
-            amount: userDeposits - onChainDepositsSum,
-            level: "-",
-            timestamp: mockTime,
-            status: "Completed",
-            txHash: "0x_fallback_deposit",
-            blockNumber: 0
-          });
-        }
-      }
-
-      const userWithdrawn = safeFloat(userData.totalWithdrawn);
-      if (userWithdrawn > 0) {
-        const onChainWithdrawalsSum = baseTxs
-          .filter(t => t.type === "withdraw" && t.txHash !== "0x_fallback_withdraw")
-          .reduce((sum, t) => sum + t.amount, 0);
-
-        if (onChainWithdrawalsSum < userWithdrawn - 0.01) {
-          baseTxs.push({
-            type: "withdraw",
-            typeName: "Withdrawal",
-            fromUser: "Self",
-            amount: userWithdrawn - onChainWithdrawalsSum,
-            level: "-",
-            timestamp: mockTime + 86400,
-            status: "Completed",
-            txHash: "0x_fallback_withdraw",
-            blockNumber: 0
-          });
-        }
-      }
-
-
-
-      baseTxs.sort((a, b) => {
-        if (a.timestamp !== b.timestamp) {
-          return a.timestamp - b.timestamp;
-        }
-        if (a.type === "deposit" && b.type !== "deposit") return -1;
-        if (a.type !== "deposit" && b.type === "deposit") return 1;
-        return 0;
-      });
-
-      let runningTotalEarned = 0;
-      let runningROIEarned = 0;
-      let runningDeposit = 0;
-      const finalDeposit = safeFloat(userData.totalDeposits);
-
-      baseTxs = baseTxs.map(tx => {
-        if (tx.type === "deposit") {
-          runningDeposit += tx.amount;
-          return tx;
-        }
-        if (tx.type === "withdraw") {
-          return tx;
-        }
-        if (tx.type === "performance" && tx.typeName.includes("Achieved")) {
-          return tx;
-        }
-
-        const maxNetwork = runningDeposit * 4;
-        const maxROI = runningDeposit * 2.2;
-
-        const allowedNetwork = Math.max(0, maxNetwork - runningTotalEarned);
-        let allowed = tx.amount;
-
-        if (!tx.isSimulated) {
-          if (tx.type === "roi" || tx.type === "booster_roi") {
-            runningROIEarned += allowed;
-          }
-          runningTotalEarned += allowed;
-          return tx;
-        }
-
-        if (tx.type === "roi" || tx.type === "booster_roi") {
-          const allowedROI = Math.max(0, maxROI - runningTotalEarned);
-          allowed = Math.min(tx.amount, allowedNetwork, allowedROI);
-          runningROIEarned += allowed;
-        } else {
-          allowed = Math.min(tx.amount, allowedNetwork);
-        }
-
-        runningTotalEarned += allowed;
-
-        return {
-          ...tx,
-          amount: allowed
-        };
-      });
+      baseTxs = [...onChainEvents];
     }
-
-    // --- APPEND UNCLAIMED PENDING VIRTUAL TRANSACTIONS ---
-    const now = Math.floor(Date.now() / 1000);
-    const ONE_DAY_SECS = Number(oneDay) || 86400;
-    const PERF_ONE_DAY_SECS = Number(perfOneDay) || 86400;
-
-    const totalEarnedBeforePending = baseTxs
-      .filter(t => t.type !== "deposit" && t.type !== "withdraw")
-      .reduce((sum, t) => sum + safeFloat(t.amount), 0);
-
-    // 1. Append pending Daily ROI Payouts since lastUpdateROI
-    if (userData.totalDeposits > 0 && userData.lastUpdateROI > 0) {
-      const elapsed = Math.max(0, now - Number(userData.lastUpdateROI));
-      const pendingDays = Math.floor(elapsed / ONE_DAY_SECS);
-
-      const totalDepositsNum = safeFloat(userData.totalDeposits);
-      const rate = safeFloat(userData.boosterRate) || 0.5; // percent
-
-      const maxRoiLimit = totalDepositsNum * 2.2;
-      const maxNetworkLimit = totalDepositsNum * 4.0;
-
-      let runningTotalEarned = totalEarnedBeforePending;
-
-      for (let day = 1; day <= pendingDays; day++) {
-        const payoutTime = Number(userData.lastUpdateROI) + day * ONE_DAY_SECS;
-        const dailyRoiRate = totalDepositsNum * 0.005;
-        const boosterRoiRate = totalDepositsNum * Math.max(0, (rate / 100) - 0.005);
-        let pending = dailyRoiRate + boosterRoiRate;
-
-        // Enforce 220% ROI Cap
-        if (runningTotalEarned >= maxRoiLimit) {
-          pending = 0;
-        } else if (runningTotalEarned + pending > maxRoiLimit) {
-          pending = maxRoiLimit - runningTotalEarned;
-        }
-
-        // Enforce 400% Network Cap
-        if (runningTotalEarned >= maxNetworkLimit) {
-          pending = 0;
-        } else if (runningTotalEarned + pending > maxNetworkLimit) {
-          pending = maxNetworkLimit - runningTotalEarned;
-        }
-
-        if (pending > 0) {
-          runningTotalEarned += pending;
-
-          const roiSettled = baseTxs.some(t => t.type === "roi" && Math.abs(t.timestamp - payoutTime) < 30);
-          if (!roiSettled) {
-            const isBoosted = rate > 0.5;
-            baseTxs.push({
-              type: "roi",
-              typeName: isBoosted ? "Daily & Booster ROI Payout" : "Daily ROI Payout",
-              fromUser: "Contract",
-              amount: pending,
-              level: "-",
-              timestamp: payoutTime,
-              status: "Completed",
-              txHash: `0x_pending_roi_${day}`,
-              blockNumber: 0,
-              isSimulated: true
-            });
-          }
-        }
-      }
-    }
-
-    // 2. Append pending Performance daily salary streams since lastClaimTime
-    const maxNetworkLimit = safeFloat(userData.totalDeposits) * 4.0;
-    let runningTotalEarnedForPerf = totalEarnedBeforePending;
-
-    activeBonuses.forEach((bonus, bIdx) => {
-      const start = Number(bonus.lastClaimTime || bonus.startTime);
-      const end = Math.min(now, Number(bonus.endTime));
-      if (end > start) {
-        const pendingDays = Math.floor((end - start) / PERF_ONE_DAY_SECS);
-        for (let day = 1; day <= pendingDays; day++) {
-          const salaryTime = start + day * PERF_ONE_DAY_SECS;
-
-          let salaryAmt = bonus.dailyRate;
-
-          // Enforce 400% Network Cap
-          if (runningTotalEarnedForPerf >= maxNetworkLimit) {
-            salaryAmt = 0;
-          } else if (runningTotalEarnedForPerf + salaryAmt > maxNetworkLimit) {
-            salaryAmt = maxNetworkLimit - runningTotalEarnedForPerf;
-          }
-
-          if (salaryAmt > 0) {
-            runningTotalEarnedForPerf += salaryAmt;
-            const salarySettled = baseTxs.some(t => t.type === "perf_daily" && Math.abs(t.timestamp - salaryTime) < 30);
-            if (!salarySettled) {
-              baseTxs.push({
-                type: "perf_daily",
-                typeName: "Performance Daily Payout",
-                fromUser: "Contract",
-                amount: salaryAmt,
-                level: "-",
-                timestamp: salaryTime,
-                status: "Completed",
-                txHash: `0x_pending_salary_${bIdx}_${day}`,
-                blockNumber: 0,
-                isSimulated: true
-              });
-            }
-          }
-        }
-      }
-    });
 
     // Sort descending for final table list display
     baseTxs.sort((a, b) => {
@@ -2141,7 +1991,7 @@ export default function Dashboard() {
     });
 
     return baseTxs;
-  }, [dbLedger, onChainEvents, treeNodes, userData, directsList, oneDay, perfOneDay, activeBonuses, walletConnected, isRegistered]);
+  }, [dbLedger, onChainEvents, walletConnected, isRegistered]);
 
   // Memoized filter for reports
   const filteredReportsTxs = useMemo(() => {
@@ -2275,83 +2125,29 @@ export default function Dashboard() {
 
   // Display-ready values calculated chronologically from txs list
   const statsToDisplay = useMemo(() => {
-    // Fallback if txs is empty
-    if (txs.length === 0) {
-      const dailyROI = parseFloat(userData.dailyROIEarned) + displayPendingDaily;
-      const boosterROI = parseFloat(userData.roiBoosterEarned) + displayPendingBooster;
-      const levelIncome = parseFloat(userData.levelIncomeEarned);
-      const levelROI = parseFloat(userData.levelROIEarned) + displayPendingLevelROI;
-      const performance = parseFloat(userData.performanceBonusEarned) + displayPendingPerf;
-      return {
-        dailyROI: dailyROI.toFixed(2),
-        boosterROI: boosterROI.toFixed(2),
-        levelIncome: levelIncome.toFixed(2),
-        levelROI: levelROI.toFixed(2),
-        performance: performance.toFixed(2),
-        totalROI: (dailyROI + boosterROI).toFixed(2),
-        totalEarned: (dailyROI + boosterROI + levelIncome + levelROI + performance).toFixed(2),
-        totalAvailable: (
-          parseFloat(userData.claimableBalance) +
-          displayPendingDaily +
-          displayPendingBooster +
-          displayPendingPerf
-        ).toFixed(2)
-      };
-    }
+    const dailyROI = parseFloat(userData.dailyROIEarned || "0");
+    const boosterROI = parseFloat(userData.roiBoosterEarned || "0");
+    const levelIncome = parseFloat(userData.levelIncomeEarned || "0");
+    const levelROI = parseFloat(userData.levelROIEarned || "0");
+    const performance = parseFloat(userData.performanceBonusEarned || "0");
 
-    let dailyROI = 0;
-    let boosterROI = 0;
-    let levelIncome = 0;
-    let levelROI = 0;
-    let perfDaily = 0;
-    let perfInstant = 0;
-
-    txs.forEach(tx => {
-      if (tx.status && tx.status.startsWith("Pending")) {
-        return;
-      }
-      if (tx.type === "roi") dailyROI += tx.amount;
-      else if (tx.type === "booster_roi") boosterROI += tx.amount;
-      else if (tx.type === "level_income") levelIncome += tx.amount;
-      else if (tx.type === "level_roi") levelROI += tx.amount;
-      else if (tx.type === "perf_daily") perfDaily += tx.amount;
-      else if (tx.type === "perf_instant") perfInstant += tx.amount;
-    });
-
-    const displayDailyTotal = dailyROI;
-    const displayBoosterTotal = boosterROI;
-    const displayLevelRoiTotal = levelROI;
-    const displayPerfTotal = perfDaily + perfInstant;
-
-    const totalEarned = displayDailyTotal + displayBoosterTotal + levelIncome + displayLevelRoiTotal + displayPerfTotal;
-    const totalAvailable = parseFloat(userData.claimableBalance) +
+    const totalEarned = dailyROI + boosterROI + levelIncome + levelROI + performance;
+    const totalAvailable = parseFloat(userData.claimableBalance || "0") +
       displayPendingDaily +
       displayPendingBooster +
       displayPendingPerf;
 
-    console.log("STATS_DEBUG:", {
-      txsLength: txs.length,
-      perfDaily,
-      perfInstant,
-      displayPerfTotal,
-      displayDailyTotal,
-      levelIncome,
-      displayLevelRoiTotal,
-      userDataPerf: userData.performanceBonusEarned,
-      userDataROI: userData.dailyROIEarned
-    });
-
     return {
-      dailyROI: displayDailyTotal.toFixed(2),
-      boosterROI: displayBoosterTotal.toFixed(2),
+      dailyROI: dailyROI.toFixed(2),
+      boosterROI: boosterROI.toFixed(2),
       levelIncome: levelIncome.toFixed(2),
-      levelROI: displayLevelRoiTotal.toFixed(2),
-      performance: displayPerfTotal.toFixed(2),
-      totalROI: (displayDailyTotal + displayBoosterTotal).toFixed(2),
+      levelROI: levelROI.toFixed(2),
+      performance: performance.toFixed(2),
+      totalROI: (dailyROI + boosterROI).toFixed(2),
       totalEarned: totalEarned.toFixed(2),
       totalAvailable: totalAvailable.toFixed(2)
     };
-  }, [txs, userData, displayPendingDaily, displayPendingBooster, displayPendingLevelROI, displayPendingPerf]);
+  }, [userData, displayPendingDaily, displayPendingBooster, displayPendingPerf]);
 
   const displayDailyROI = parseFloat(statsToDisplay.dailyROI).toFixed(2);
   const displayBoosterROI = parseFloat(statsToDisplay.boosterROI).toFixed(2);
