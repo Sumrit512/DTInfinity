@@ -1657,16 +1657,11 @@ export default function Dashboard() {
     }
   }
 
-  // Handle manual withdrawal claim
+  // Handle manual withdrawal claim (claims full available amount)
   async function handleWithdraw(e) {
-    e.preventDefault();
+    if (e && e.preventDefault) e.preventDefault();
     if (!walletConnected) {
       alert("Please connect wallet first");
-      return;
-    }
-    const val = parseFloat(withdrawAmount);
-    if (isNaN(val) || val <= 0) {
-      alert("Please enter a valid withdraw amount");
       return;
     }
 
@@ -1675,8 +1670,8 @@ export default function Dashboard() {
       parseFloat(pendingBalances.pendingBooster) + 
       parseFloat(pendingBalances.pendingPerf);
 
-    if (val > available) {
-      alert("Withdraw amount exceeds available balance");
+    if (available <= 0) {
+      alert("No available rewards to claim");
       return;
     }
 
@@ -1686,7 +1681,7 @@ export default function Dashboard() {
       const signer = await provider.getSigner();
       const dtContract = new ethers.Contract(dtInfinityAddress, DT_INFINITY_ABI, signer);
 
-      const tx = await dtContract.withdraw(ethers.parseUnits(withdrawAmount, 18));
+      const tx = await dtContract.claimAll();
       const receipt = await tx.wait();
 
       const txDetailsObj = {
@@ -3755,17 +3750,6 @@ export default function Dashboard() {
             <div className="withdraw-card">
               <form onSubmit={handleWithdraw}>
                 <div className="field">
-                  <label>Amount (USDT)</label>
-                  <input 
-                    type="number" 
-                    step="0.01"
-                    placeholder="0.00"
-                    value={withdrawAmount}
-                    onChange={(e) => setWithdrawAmount(e.target.value)}
-                    required
-                  />
-                </div>
-                <div className="field">
                   <label>Receiving Wallet Address (Auto-sets to yours)</label>
                   <input 
                     type="text" 
@@ -3777,8 +3761,8 @@ export default function Dashboard() {
                     Security Rule: Earnings are always paid back to the connected wallet.
                   </span>
                 </div>
-                <button type="submit" className="withdraw-btn" disabled={!walletConnected || loading}>
-                  Request Withdrawal
+                <button type="submit" className="withdraw-btn" disabled={!walletConnected || loading || parseFloat(totalAvailableBalance) <= 0}>
+                  Request Full Withdrawal ({totalAvailableBalance} USDT)
                 </button>
               </form>
 
@@ -3786,17 +3770,8 @@ export default function Dashboard() {
                 <div className="k">Available to Withdraw</div>
                 <div className="v mono">{totalAvailableBalance} USDT</div>
                 <div className="note">
-                  Withdrawals trigger a real-time smart contract payout.
+                  Withdrawals trigger a real-time smart contract payout of all accrued and claimable yields.
                 </div>
-                
-                <button 
-                  onClick={handleClaimAll} 
-                  className="withdraw-btn" 
-                  style={{ background: "transparent", color: "var(--blue-bright)", border: "1px solid var(--border)", marginTop: "15px" }}
-                  disabled={!walletConnected || loading}
-                >
-                  Claim Full Balance (Claim All)
-                </button>
               </div>
             </div>
           </div>
