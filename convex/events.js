@@ -103,3 +103,13 @@ export const getLedger = query({
     return sorted;
   }
 });
+
+export const clearAllOnChainEvents = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const all = await ctx.db.query("onChainEvents").collect();
+    for (const doc of all) {
+      await ctx.db.delete(doc._id);
+    }
+  }
+});

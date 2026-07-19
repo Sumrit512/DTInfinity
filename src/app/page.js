@@ -1098,8 +1098,10 @@ export default function Dashboard() {
           let day = 1;
           const startT = activeBonuses.length > 0 ? Number(activeBonuses[0].startTime) : Number(basicInfo.registrationTime);
           const interval = Number(perfOneDay) || 480;
+          const step = dailyRate > 0 ? dailyRate : remaining;
           while (remaining > 0.01) {
-            const amt = Math.min(dailyRate, remaining);
+            const amt = Math.min(step, remaining);
+            if (amt <= 0) break; // prevent infinite loop
             allOnChainEvents.push({
               type: "perf_daily",
               typeName: "Performance Daily Salary",
@@ -1118,12 +1120,15 @@ export default function Dashboard() {
 
         // Generate hourly Daily ROI events spaced by ONE_DAY (3600 seconds)
         if (totalRoiOnChain - scannedRoi > 0.01) {
-          const dailyRoiRate = parseFloat(userData.totalDeposits || "200") * 0.005;
+          const userDepositsNum = parseFloat(ethers.formatUnits(basicInfo.totalDeposits || 0n, 18));
+          const dailyRoiRate = userDepositsNum * 0.005;
           let remaining = totalRoiOnChain - scannedRoi;
           let day = 1;
           const interval = Number(oneDay) || 3600;
+          const step = dailyRoiRate > 0 ? dailyRoiRate : remaining;
           while (remaining > 0.01) {
-            const amt = Math.min(dailyRoiRate, remaining);
+            const amt = Math.min(step, remaining);
+            if (amt <= 0) break; // prevent infinite loop
             allOnChainEvents.push({
               type: "roi",
               typeName: "Daily ROI Payout",
@@ -1142,15 +1147,18 @@ export default function Dashboard() {
 
         // Generate hourly Booster ROI events spaced by ONE_DAY (3600 seconds)
         if (totalBoosterOnChain - scannedBooster > 0.01) {
+          const userDepositsNum = parseFloat(ethers.formatUnits(basicInfo.totalDeposits || 0n, 18));
           const bRatePercent = Number(boosterRate || 0n) / 100;
           const bRateDiff = Math.max(0, (bRatePercent / 100) - 0.005);
-          const boosterRoiRate = parseFloat(userData.totalDeposits || "200") * bRateDiff;
+          const boosterRoiRate = userDepositsNum * bRateDiff;
           
           let remaining = totalBoosterOnChain - scannedBooster;
           let day = 1;
           const interval = Number(oneDay) || 3600;
+          const step = boosterRoiRate > 0 ? boosterRoiRate : remaining;
           while (remaining > 0.01) {
-            const amt = Math.min(boosterRoiRate > 0 ? boosterRoiRate : remaining, remaining);
+            const amt = Math.min(step, remaining);
+            if (amt <= 0) break; // prevent infinite loop
             allOnChainEvents.push({
               type: "booster_roi",
               typeName: "Booster ROI Payout",
