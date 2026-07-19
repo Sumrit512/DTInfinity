@@ -18,6 +18,18 @@ export const upsertUser = mutation({
     strongestLegAddress: v.string(),
     strongestLegVolume: v.number(),
     boosterRate: v.number(),
+    dailyROIEarned: v.optional(v.number()),
+    roiBoosterEarned: v.optional(v.number()),
+    levelIncomeEarned: v.optional(v.number()),
+    levelROIEarned: v.optional(v.number()),
+    performanceBonusEarned: v.optional(v.number()),
+    activeBonuses: v.optional(v.array(v.object({
+      tierIndex: v.number(),
+      dailyRate: v.number(),
+      startTime: v.number(),
+      endTime: v.number(),
+      lastClaimTime: v.number(),
+    }))),
   },
   handler: async (ctx, args) => {
     const contractLower = args.contractAddress.toLowerCase();
@@ -47,6 +59,12 @@ export const upsertUser = mutation({
       strongestLegAddress: args.strongestLegAddress.toLowerCase(),
       strongestLegVolume: args.strongestLegVolume,
       boosterRate: args.boosterRate,
+      dailyROIEarned: args.dailyROIEarned,
+      roiBoosterEarned: args.roiBoosterEarned,
+      levelIncomeEarned: args.levelIncomeEarned,
+      levelROIEarned: args.levelROIEarned,
+      performanceBonusEarned: args.performanceBonusEarned,
+      activeBonuses: args.activeBonuses,
       lastSynced: Date.now(),
     };
 
@@ -196,6 +214,16 @@ export const checkTime = query({
       dateNow: Date.now(),
       dateNowSeconds: Math.floor(Date.now() / 1000)
     };
+  }
+});
+
+export const findUserByAddress = query({
+  args: { address: v.string() },
+  handler: async (ctx, args) => {
+    return await ctx.db
+      .query("users")
+      .filter((q) => q.eq(q.field("address"), args.address.toLowerCase()))
+      .first();
   }
 });
 

@@ -6,7 +6,7 @@ import { useQuery, useMutation, useAction } from "convex/react";
 import { api } from "../../convex/_generated/api.js";
 
 // Default contract addresses (placeholders that user can update in settings)
-const DEFAULT_DT_INFINITY_ADDRESS = "0x70f53a7a65269992cf2d01ee7d6fe77e3da990d9";
+const DEFAULT_DT_INFINITY_ADDRESS = "0xe440075f60e727728f398f3245ad1893f3aa6af2";
 const DEFAULT_USDT_ADDRESS = "0x0aB8c2DfE9aD2e2D3f58E6006884cda5e6f1E7B9";
 
 // Simple USDT ABI
@@ -200,6 +200,7 @@ export default function Dashboard() {
   const syncWithdrawalsMutation = useMutation(api.transactions.syncWithdrawals);
   const syncOnChainEventsMutation = useMutation(api.events.syncOnChainEvents);
   const syncMissedTxAction = useAction(api.transactions.syncMissedTx);
+  const fetchAndSyncLogsAction = useAction(api.fetchLogs.fetchAndSyncLogs);
 
   const dbLedger = useQuery(api.events.getLedger, walletAddress ? {
     contractAddress: dtInfinityAddress,
@@ -237,7 +238,9 @@ export default function Dashboard() {
     deposits,
     withdrawals,
     events,
-    sessionTxDetails
+    sessionTxDetails,
+    incomeInfo,
+    activeBonuses
   ) {
     if (!addr) return;
     console.log("SYNC_TO_CONVEX_CALLED:", { addr, depositsLength: deposits?.length, deposits, withdrawals, events });
@@ -259,6 +262,12 @@ export default function Dashboard() {
         strongestLegAddress: networkInfo.strongestLegAddress,
         strongestLegVolume: parseFloat(ethers.formatUnits(networkInfo.strongestLegVolume || 0n, 18)),
         boosterRate: Number(boosterRate || 0n) / 100,
+        dailyROIEarned: incomeInfo ? parseFloat(ethers.formatUnits(incomeInfo.dailyROIEarned || 0n, 18)) : 0,
+        roiBoosterEarned: incomeInfo ? parseFloat(ethers.formatUnits(incomeInfo.roiBoosterEarned || 0n, 18)) : 0,
+        levelIncomeEarned: incomeInfo ? parseFloat(ethers.formatUnits(incomeInfo.levelIncomeEarned || 0n, 18)) : 0,
+        levelROIEarned: incomeInfo ? parseFloat(ethers.formatUnits(incomeInfo.levelROIEarned || 0n, 18)) : 0,
+        performanceBonusEarned: incomeInfo ? parseFloat(ethers.formatUnits(incomeInfo.performanceBonusEarned || 0n, 18)) : 0,
+        activeBonuses: activeBonuses || [],
       });
 
       // 2. Sync Deposits
@@ -795,10 +804,20 @@ export default function Dashboard() {
 
     if (levelIncomeAccumulated < targetLevelIncome - 0.01) {
       const diff = targetLevelIncome - levelIncomeAccumulated;
+      let fallbackL1Addr = "Downline";
+      if (treeNodes && Object.keys(treeNodes).length > 0) {
+        const l1Child = Object.keys(treeNodes).find(childAddr => {
+          const node = treeNodes[childAddr];
+          return node.sponsor && node.sponsor.toLowerCase() === addr.toLowerCase();
+        });
+        if (l1Child) {
+          fallbackL1Addr = l1Child;
+        }
+      }
       generated.push({
         type: "level_income",
         typeName: "Level Income",
-        fromUser: "Downline",
+        fromUser: fallbackL1Addr,
         amount: diff,
         level: "1",
         timestamp: regTime + 1800,
@@ -813,6 +832,22 @@ export default function Dashboard() {
     let levelROIAccumulated = 0;
     
     if (targetLevelROI > 0) {
+      let level5Addr = "Downline";
+      if (treeNodes && Object.keys(treeNodes).length > 0) {
+        const l5Child = Object.keys(treeNodes).find(childAddr => {
+          let level = 1;
+          let current = treeNodes[childAddr];
+          while (current && current.sponsor && current.sponsor.toLowerCase() !== addr.toLowerCase() && level < 20) {
+            current = treeNodes[current.sponsor.toLowerCase()];
+            level++;
+          }
+          return level === 5;
+        });
+        if (l5Child) {
+          level5Addr = l5Child;
+        }
+      }
+
       let day = 1;
       while (levelROIAccumulated < targetLevelROI - 0.01) {
         const payoutTime = regTime + day * ONE_DAY_SECS;
@@ -823,7 +858,7 @@ export default function Dashboard() {
         generated.push({
           type: "level_roi",
           typeName: "Level ROI Matching",
-          fromUser: "Downline",
+          fromUser: level5Addr,
           amount: amt,
           level: "5",
           timestamp: payoutTime,
@@ -1111,9 +1146,8 @@ export default function Dashboard() {
           console.warn("Could not read user deposits/withdrawals arrays", e);
         }
 
-        // Query actual on-chain events from browser provider first (for correct timestamps)
-        let allOnChainEvents = [];
-        let logsQueriedSuccessfully = false;
+        // Trigger server-side log fetch via Convex Action (runs on Convex servers, bypasses browser 403/CORS).
+        // The action writes directly to onChainEvents table; dbLedger reactive query picks it up automatically.
         try {
           const latestBlock = Number(await provider.getBlockNumber());
           const regFilter = dtContract.filters.Registered(addr);
@@ -1123,114 +1157,37 @@ export default function Dashboard() {
             fromBlockVal = regEvents[0].blockNumber;
           }
 
-          const filterLevelIncome = dtContract.filters.LevelIncomePaid(addr);
-          const filterLevelROI = dtContract.filters.LevelROIPaid(addr);
-          const filterPerfClaimed = dtContract.filters.PerformanceBonusClaimed(addr);
-          const filterPerfDaily = dtContract.filters.PerformanceDailyPaid(addr);
-          const filterROI = dtContract.filters.ROIAccumulated(addr);
-          const filterBooster = dtContract.filters.BoosterROIAccumulated(addr);
-
-          const [cLevelIncome, cLevelROI, cPerfClaimed, cPerfDaily, cROI, cBooster] = await Promise.all([
-            dtContract.queryFilter(filterLevelIncome, fromBlockVal, latestBlock),
-            dtContract.queryFilter(filterLevelROI, fromBlockVal, latestBlock),
-            dtContract.queryFilter(filterPerfClaimed, fromBlockVal, latestBlock),
-            dtContract.queryFilter(filterPerfDaily, fromBlockVal, latestBlock),
-            dtContract.queryFilter(filterROI, fromBlockVal, latestBlock),
-            dtContract.queryFilter(filterBooster, fromBlockVal, latestBlock)
-          ]);
-
-          const mappedLevelIncome = (cLevelIncome || []).map((event) => ({
-            type: "level_income",
-            typeName: "Level Income",
-            fromUser: event.args.downline,
-            amount: parseFloat(ethers.formatUnits(event.args.amount || 0n, 18)),
-            level: event.args.level.toString(),
-            timestamp: Number(event.args.time || 0n),
-            status: "Completed",
-            txHash: event.transactionHash,
-            blockNumber: Number(event.blockNumber || 0)
+          // Build perfTiers array for the action
+          const perfTiersForAction = PERFORMANCE_TIERS.map(t => ({
+            instant: t.instant,
+            daily: t.daily,
           }));
 
-          const mappedLevelROI = (cLevelROI || []).map((event) => ({
-            type: "level_roi",
-            typeName: "Level ROI Matching",
-            fromUser: event.args.downline,
-            amount: parseFloat(ethers.formatUnits(event.args.amount || 0n, 18)),
-            level: event.args.level.toString(),
-            timestamp: Number(event.args.time || 0n),
-            status: "Completed",
-            txHash: event.transactionHash,
-            blockNumber: Number(event.blockNumber || 0)
-          }));
-
-          const mappedPerfClaimed = (cPerfClaimed || []).map((event) => {
-            const tierIdx = Number(event.args.tierIndex);
-            const chooseInstant = event.args.chooseInstant;
-            const tier = PERFORMANCE_TIERS[tierIdx];
-            return {
-              type: chooseInstant ? "perf_instant" : "perf_claim",
-              typeName: chooseInstant ? "Performance Bonus (Instant)" : "Performance Bonus Claimed",
-              fromUser: "Contract",
-              amount: chooseInstant ? tier.instant : 0,
-              level: "-",
-              timestamp: Number(event.args.time || 0n),
-              status: "Completed",
-              txHash: event.transactionHash,
-              blockNumber: Number(event.blockNumber || 0),
-              tierIndex: tierIdx
-            };
+          console.log(`Triggering server-side log fetch from block ${fromBlockVal} to ${latestBlock}...`);
+          fetchAndSyncLogsAction({
+            contractAddress: dtInfinityAddress,
+            userAddress: addr,
+            fromBlock: fromBlockVal,
+            toBlock: latestBlock,
+            perfTiers: perfTiersForAction,
+          }).then(result => {
+            console.log(`Server-side log fetch completed: ${result.count} events synced`);
+          }).catch(err => {
+            console.warn("Server-side log fetch failed (will use math fallback in DB):", err.message);
           });
 
-          const mappedPerfDaily = (cPerfDaily || []).map((event) => ({
-            type: "perf_daily",
-            typeName: "Performance Daily Salary",
-            fromUser: "Contract",
-            amount: parseFloat(ethers.formatUnits(event.args.amount || 0n, 18)),
-            level: "-",
-            timestamp: Number(event.args.time || 0n),
-            status: "Completed",
-            txHash: event.transactionHash,
-            blockNumber: Number(event.blockNumber || 0)
-          }));
-
-          const mappedROI = (cROI || []).map((event) => ({
-            type: "roi",
-            typeName: "Daily ROI Payout",
-            fromUser: "Contract",
-            amount: parseFloat(ethers.formatUnits(event.args.amount || 0n, 18)),
-            level: "-",
-            timestamp: Number(event.args.time || 0n),
-            status: "Completed",
-            txHash: event.transactionHash,
-            blockNumber: Number(event.blockNumber || 0)
-          }));
-
-          const mappedBooster = (cBooster || []).map((event) => ({
-            type: "booster_roi",
-            typeName: "Booster ROI Payout",
-            fromUser: "Contract",
-            amount: parseFloat(ethers.formatUnits(event.args.amount || 0n, 18)),
-            level: "-",
-            timestamp: Number(event.args.time || 0n),
-            status: "Completed",
-            txHash: event.transactionHash,
-            blockNumber: Number(event.blockNumber || 0)
-          }));
-
-          allOnChainEvents = [
-            ...mappedLevelIncome,
-            ...mappedLevelROI,
-            ...mappedPerfClaimed,
-            ...mappedPerfDaily,
-            ...mappedROI,
-            ...mappedBooster
-          ];
-          logsQueriedSuccessfully = true;
-        } catch (logErr) {
-          console.warn("Failed to query log events from wallet provider, falling back to math generator", logErr);
+        } catch (blockErr) {
+          console.warn("Could not get block number for server-side log fetch:", blockErr.message);
         }
 
-        if (!logsQueriedSuccessfully) {
+        // While the server-side fetch runs in the background, use the math generator
+        // for an immediate display. Once Convex writes to DB, dbLedger (reactive) updates automatically.
+        let allOnChainEvents = [];
+        if ((dbLedger || []).filter(e => !["deposit","withdraw"].includes(e.type) && !e.isSimulated).length > 0) {
+          // DB already has real (non-simulated) events from a previous server-side fetch — use them
+          allOnChainEvents = [];  // dbLedger already includes all events, set below
+        } else {
+          // Fall back to math generator for immediate display while server fetch runs
           allOnChainEvents = generateEventsList(
             addr,
             Number(basicInfo.registrationTime),
@@ -1248,6 +1205,7 @@ export default function Dashboard() {
           );
         }
 
+
         setOnChainEvents([...deposits, ...withdrawals, ...allOnChainEvents]);
 
         // Sync everything to Convex
@@ -1261,7 +1219,9 @@ export default function Dashboard() {
             userDeposits,
             userWithdrawals,
             allOnChainEvents,
-            sessionTxDetails
+            sessionTxDetails,
+            incomeInfo,
+            bonusesMapped
           );
         } catch (convexErr) {
           console.warn("Failed to sync state to Convex in loadBlockchainData:", convexErr);

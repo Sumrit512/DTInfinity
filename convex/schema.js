@@ -18,6 +18,18 @@ export default defineSchema({
     strongestLegAddress: v.string(),
     strongestLegVolume: v.number(),
     boosterRate: v.number(),
+    dailyROIEarned: v.optional(v.number()),
+    roiBoosterEarned: v.optional(v.number()),
+    levelIncomeEarned: v.optional(v.number()),
+    levelROIEarned: v.optional(v.number()),
+    performanceBonusEarned: v.optional(v.number()),
+    activeBonuses: v.optional(v.array(v.object({
+      tierIndex: v.number(),
+      dailyRate: v.number(),
+      startTime: v.number(),
+      endTime: v.number(),
+      lastClaimTime: v.number(),
+    }))),
     lastSynced: v.number(),
   }).index("by_contract_address_address", ["contractAddress", "address"])
     .index("by_address", ["address"]),
