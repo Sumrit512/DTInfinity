@@ -1088,46 +1088,83 @@ export default function Dashboard() {
           });
         }
 
+        // Generate periodic Performance daily salary events spaced by PERF_ONE_DAY
         if (totalPerfOnChain - scannedPerf > 0.01) {
-          allOnChainEvents.push({
-            type: "perf_instant",
-            typeName: "Performance Bonus",
-            fromUser: "Contract",
-            amount: totalPerfOnChain - scannedPerf,
-            level: "-",
-            timestamp: Number(basicInfo.registrationTime) + 1800,
-            status: "Completed",
-            txHash: "0x_fallback_perf",
-            blockNumber: 0
-          });
+          let dailyRate = 5.0;
+          if (activeBonuses && activeBonuses.length > 0) {
+            dailyRate = activeBonuses[0].dailyRate;
+          }
+          let remaining = totalPerfOnChain - scannedPerf;
+          let day = 1;
+          const startT = activeBonuses.length > 0 ? Number(activeBonuses[0].startTime) : Number(basicInfo.registrationTime);
+          const interval = Number(perfOneDay) || 480;
+          while (remaining > 0.01) {
+            const amt = Math.min(dailyRate, remaining);
+            allOnChainEvents.push({
+              type: "perf_daily",
+              typeName: "Performance Daily Salary",
+              fromUser: "Contract",
+              amount: amt,
+              level: "-",
+              timestamp: startT + day * interval,
+              status: "Completed",
+              txHash: `0x_fallback_perf_daily_${day}`,
+              blockNumber: 0
+            });
+            remaining -= amt;
+            day++;
+          }
         }
 
+        // Generate hourly Daily ROI events spaced by ONE_DAY (3600 seconds)
         if (totalRoiOnChain - scannedRoi > 0.01) {
-          allOnChainEvents.push({
-            type: "roi",
-            typeName: "Daily ROI Payout",
-            fromUser: "Contract",
-            amount: totalRoiOnChain - scannedRoi,
-            level: "-",
-            timestamp: Number(basicInfo.registrationTime) + 1800,
-            status: "Completed",
-            txHash: "0x_fallback_roi",
-            blockNumber: 0
-          });
+          const dailyRoiRate = parseFloat(userData.totalDeposits || "200") * 0.005;
+          let remaining = totalRoiOnChain - scannedRoi;
+          let day = 1;
+          const interval = Number(oneDay) || 3600;
+          while (remaining > 0.01) {
+            const amt = Math.min(dailyRoiRate, remaining);
+            allOnChainEvents.push({
+              type: "roi",
+              typeName: "Daily ROI Payout",
+              fromUser: "Contract",
+              amount: amt,
+              level: "-",
+              timestamp: Number(basicInfo.registrationTime) + day * interval,
+              status: "Completed",
+              txHash: `0x_fallback_roi_${day}`,
+              blockNumber: 0
+            });
+            remaining -= amt;
+            day++;
+          }
         }
 
+        // Generate hourly Booster ROI events spaced by ONE_DAY (3600 seconds)
         if (totalBoosterOnChain - scannedBooster > 0.01) {
-          allOnChainEvents.push({
-            type: "booster_roi",
-            typeName: "Booster ROI Payout",
-            fromUser: "Contract",
-            amount: totalBoosterOnChain - scannedBooster,
-            level: "-",
-            timestamp: Number(basicInfo.registrationTime) + 1800,
-            status: "Completed",
-            txHash: "0x_fallback_booster",
-            blockNumber: 0
-          });
+          const bRatePercent = Number(boosterRate || 0n) / 100;
+          const bRateDiff = Math.max(0, (bRatePercent / 100) - 0.005);
+          const boosterRoiRate = parseFloat(userData.totalDeposits || "200") * bRateDiff;
+          
+          let remaining = totalBoosterOnChain - scannedBooster;
+          let day = 1;
+          const interval = Number(oneDay) || 3600;
+          while (remaining > 0.01) {
+            const amt = Math.min(boosterRoiRate > 0 ? boosterRoiRate : remaining, remaining);
+            allOnChainEvents.push({
+              type: "booster_roi",
+              typeName: "Booster ROI Payout",
+              fromUser: "Contract",
+              amount: amt,
+              level: "-",
+              timestamp: Number(basicInfo.registrationTime) + day * interval,
+              status: "Completed",
+              txHash: `0x_fallback_booster_${day}`,
+              blockNumber: 0
+            });
+            remaining -= amt;
+            day++;
+          }
         }
 
         setOnChainDeposits(deposits);
