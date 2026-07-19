@@ -88,6 +88,8 @@ export default function Dashboard() {
   const [networkName, setNetworkName] = useState("BEP-20 · BSC Testnet");
   const [loading, setLoading] = useState(false);
   const [onChainEvents, setOnChainEvents] = useState([]);
+  const [onChainDeposits, setOnChainDeposits] = useState([]);
+  const [onChainWithdrawals, setOnChainWithdrawals] = useState([]);
   const [copyText, setCopyText] = useState("Copy");
   const [isWrongNetwork, setIsWrongNetwork] = useState(false);
   const [targetChainId, setTargetChainId] = useState(97n);
@@ -1128,6 +1130,8 @@ export default function Dashboard() {
           });
         }
 
+        setOnChainDeposits(deposits);
+        setOnChainWithdrawals(withdrawals);
         setOnChainEvents([...deposits, ...withdrawals, ...allOnChainEvents]);
 
         // Sync everything to Convex
@@ -1175,6 +1179,8 @@ export default function Dashboard() {
         });
         setDirectsList([]);
         setOnChainEvents([]);
+        setOnChainDeposits([]);
+        setOnChainWithdrawals([]);
         setPendingQualifications([]);
         setActiveBonuses([]);
         setLastDepositAmount("0.00");
@@ -2059,7 +2065,7 @@ export default function Dashboard() {
 
     let baseTxs = [];
     if (dbLedger && dbLedger.length > 0) {
-      baseTxs = [...dbLedger];
+      baseTxs = [...onChainDeposits, ...onChainWithdrawals, ...dbLedger];
     } else {
       baseTxs = [...onChainEvents];
     }
@@ -2075,7 +2081,7 @@ export default function Dashboard() {
     });
 
     return baseTxs;
-  }, [dbLedger, onChainEvents, walletConnected, isRegistered]);
+  }, [dbLedger, onChainEvents, onChainDeposits, onChainWithdrawals, walletConnected, isRegistered]);
 
   // Memoized filter for reports
   const filteredReportsTxs = useMemo(() => {
