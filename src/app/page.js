@@ -310,12 +310,13 @@ export default function Dashboard() {
         });
       }
 
-      // 4. Sync On-Chain Events
-      if (events && events.length > 0) {
+      // 4. Sync On-Chain Events (Only sync real events; simulated ones are handled client-side)
+      const realEventsOnly = (events || []).filter(e => !e.isSimulated);
+      if (realEventsOnly.length > 0) {
         await syncOnChainEventsMutation({
           contractAddress: dtInfinityAddress,
           user: addr,
-          events: events.map((e, idx) => ({
+          events: realEventsOnly.map((e, idx) => ({
             type: e.type,
             typeName: e.typeName,
             fromUser: e.fromUser,
@@ -325,8 +326,9 @@ export default function Dashboard() {
             status: e.status,
             txHash: e.txHash || `0x_evt_${addr.toLowerCase()}_${idx}`,
             blockNumber: e.blockNumber || 0,
-            isSimulated: e.isSimulated || false,
+            isSimulated: false,
             tierIndex: e.tierIndex,
+            logIndex: e.logIndex,
           })),
         });
       }
@@ -773,31 +775,46 @@ export default function Dashboard() {
       Object.keys(treeNodes).forEach(childAddr => {
         if (childAddr.toLowerCase() === addr.toLowerCase()) return;
         const node = treeNodes[childAddr];
-        if (node && node.deposits) {
-          node.deposits.forEach((dep, dIdx) => {
-            let level = 1;
-            let current = node;
-            while (current && current.sponsor && current.sponsor.toLowerCase() !== addr.toLowerCase() && level < 20) {
-              current = treeNodes[current.sponsor.toLowerCase()];
-              level++;
+        if (node) {
+          let depsToUse = node.deposits;
+          if (!depsToUse || depsToUse.length === 0) {
+            const tDep = parseFloat(node.totalDeposits) || 0;
+            if (tDep > 0) {
+              depsToUse = [{ amount: tDep, timestamp: node.registrationTime || regTime }];
             }
-            if (level <= 5 && levelIncomeAccumulated < targetLevelIncome - 0.01) {
-              const levelPct = [0.08, 0.04, 0.02, 0.01, 0.01][level - 1] || 0;
-              const amt = dep.amount * levelPct;
-              generated.push({
-                type: "level_income",
-                typeName: "Level Income",
-                fromUser: childAddr,
-                amount: amt,
-                level: level.toString(),
-                timestamp: dep.timestamp,
-                status: "Completed",
-                txHash: `0x_gen_lvl_inc_${childAddr}_${dIdx}_${dep.timestamp}`,
-                blockNumber: 0
-              });
-              levelIncomeAccumulated += amt;
-            }
-          });
+          }
+          
+          if (depsToUse && depsToUse.length > 0) {
+            depsToUse.forEach((dep, dIdx) => {
+              let level = 1;
+              let current = node;
+              while (current && current.sponsor && current.sponsor.toLowerCase() !== addr.toLowerCase() && level < 20) {
+                current = treeNodes[current.sponsor.toLowerCase()];
+                level++;
+              }
+              if (level <= 5 && levelIncomeAccumulated < targetLevelIncome - 0.01) {
+                const levelPct = [0.05, 0.02, 0.01, 0.01, 0.01][level - 1] || 0;
+                let amt = dep.amount * levelPct;
+                if (levelIncomeAccumulated + amt > targetLevelIncome) {
+                  amt = targetLevelIncome - levelIncomeAccumulated;
+                }
+                if (amt > 0) {
+                  generated.push({
+                    type: "level_income",
+                    typeName: "Level Income",
+                    fromUser: childAddr,
+                    amount: amt,
+                    level: level.toString(),
+                    timestamp: dep.timestamp,
+                    status: "Completed",
+                    txHash: `0x_gen_lvl_inc_${childAddr}_${dIdx}_${dep.timestamp}`,
+                    blockNumber: 0
+                  });
+                  levelIncomeAccumulated += amt;
+                }
+              }
+            });
+          }
         }
       });
     }
@@ -832,42 +849,80 @@ export default function Dashboard() {
     let levelROIAccumulated = 0;
     
     if (targetLevelROI > 0) {
-      let level5Addr = "Downline";
-      if (treeNodes && Object.keys(treeNodes).length > 0) {
-        const l5Child = Object.keys(treeNodes).find(childAddr => {
-          let level = 1;
-          let current = treeNodes[childAddr];
-          while (current && current.sponsor && current.sponsor.toLowerCase() !== addr.toLowerCase() && level < 20) {
-            current = treeNodes[current.sponsor.toLowerCase()];
-            level++;
+      // First, get all downlines up to level 20 and their expected daily contribution
+      const downlineContributions = [];
+      const levelROIPct = [
+        0.15, 0.10, 0.05, 0.05, 0.05,
+        0.04, 0.04, 0.04, 0.04, 0.04,
+        0.03, 0.03, 0.03, 0.03, 0.03,
+        0.02, 0.02, 0.02, 0.02, 0.02
+      ];
+
+      if (treeNodes) {
+        Object.keys(treeNodes).forEach(childAddr => {
+          if (childAddr.toLowerCase() === addr.toLowerCase()) return;
+          const node = treeNodes[childAddr];
+          const tDep = parseFloat(node.totalDeposits) || 0;
+          if (tDep > 0) {
+            let level = 1;
+            let current = node;
+            while (current && current.sponsor && current.sponsor.toLowerCase() !== addr.toLowerCase() && level < 20) {
+              current = treeNodes[current.sponsor.toLowerCase()];
+              level++;
+            }
+            const expectedDaily = tDep * 0.004 * (levelROIPct[level - 1] || 0);
+            if (expectedDaily > 0) {
+              downlineContributions.push({ addr: childAddr, level, expectedDaily });
+            }
           }
-          return level === 5;
         });
-        if (l5Child) {
-          level5Addr = l5Child;
-        }
       }
 
-      let day = 1;
-      while (levelROIAccumulated < targetLevelROI - 0.01) {
-        const payoutTime = regTime + day * ONE_DAY_SECS;
-        let amt = 0.50;
-        if (levelROIAccumulated + amt > targetLevelROI) {
-          amt = targetLevelROI - levelROIAccumulated;
+      // If we found downlines, distribute remaining targetLevelROI among them realistically
+      let dayOffset = 1;
+      let iteration = 0;
+      
+      while (levelROIAccumulated < targetLevelROI - 0.01 && downlineContributions.length > 0 && iteration < 500) {
+        for (const dc of downlineContributions) {
+          if (levelROIAccumulated >= targetLevelROI - 0.01) break;
+          const payoutTime = regTime + dayOffset * ONE_DAY_SECS;
+          let amt = dc.expectedDaily;
+          if (levelROIAccumulated + amt > targetLevelROI) {
+            amt = targetLevelROI - levelROIAccumulated;
+          }
+          if (amt > 0) {
+            generated.push({
+              type: "level_roi",
+              typeName: "Level ROI Matching",
+              fromUser: dc.addr,
+              amount: amt,
+              level: dc.level.toString(),
+              timestamp: payoutTime + (Math.random() * 3600), // slight stagger
+              status: "Completed",
+              txHash: `0x_gen_lvl_roi_${dc.addr}_${dayOffset}`,
+              blockNumber: 0
+            });
+            levelROIAccumulated += amt;
+          }
         }
+        dayOffset++;
+        iteration++;
+      }
+      
+      // If still missing (e.g. no downlines found or target very high), use a final fallback
+      if (levelROIAccumulated < targetLevelROI - 0.01) {
+        const diff = targetLevelROI - levelROIAccumulated;
         generated.push({
           type: "level_roi",
           typeName: "Level ROI Matching",
-          fromUser: level5Addr,
-          amount: amt,
-          level: "5",
-          timestamp: payoutTime,
+          fromUser: "Downline",
+          amount: diff,
+          level: "1",
+          timestamp: regTime + dayOffset * ONE_DAY_SECS,
           status: "Completed",
-          txHash: `0x_gen_lvl_roi_${regTime}_${day}`,
+          txHash: `0x_gen_lvl_roi_fallback_${regTime}`,
           blockNumber: 0
         });
-        levelROIAccumulated += amt;
-        day++;
       }
     }
 
@@ -1150,8 +1205,14 @@ export default function Dashboard() {
         // The action writes directly to onChainEvents table; dbLedger reactive query picks it up automatically.
         try {
           const latestBlock = Number(await provider.getBlockNumber());
-          let fromBlockVal = Math.max(0, latestBlock - 150000);
           
+          // Estimate registration block based on registrationTime (3 seconds per block on BSC)
+          const regTime = Number(basicInfo.registrationTime || 0n);
+          const nowSecs = Math.floor(Date.now() / 1000);
+          const diffSecs = Math.max(0, nowSecs - regTime);
+          const blocksDiff = Math.floor(diffSecs / 3);
+          let fromBlockVal = Math.max(0, latestBlock - blocksDiff - 20000); // 20,000 blocks safety buffer (~16 hours before registration)
+
           try {
             const regFilter = dtContract.filters.Registered(addr);
             const regEvents = await dtContract.queryFilter(regFilter, fromBlockVal, latestBlock);
@@ -1159,13 +1220,7 @@ export default function Dashboard() {
               fromBlockVal = regEvents[0].blockNumber;
             }
           } catch (filterErr) {
-            console.log("Browser queryFilter for Registered: RPC restriction encountered, using deploymentBlock fallback.");
-            if (deploymentBlock) {
-              const parsedDepBlock = parseInt(deploymentBlock);
-              if (!isNaN(parsedDepBlock) && parsedDepBlock >= 0) {
-                fromBlockVal = parsedDepBlock;
-              }
-            }
+            console.log("Browser queryFilter for Registered failed; using estimated block number fallback: " + fromBlockVal);
           }
 
           // Build perfTiers array for the action
@@ -1193,6 +1248,16 @@ export default function Dashboard() {
 
         // While the server-side fetch runs in the background, use the math generator
         // for an immediate display. Once Convex writes to DB, dbLedger (reactive) updates automatically.
+        // Merge loadedDirectsMap (from live RPC) with treeNodes (from Convex DB) to get the full
+        // set of known downlines. Deep merge to preserve the 'deposits' array from Convex DB!
+        const mergedTreeNodes = { ...treeNodes };
+        Object.keys(loadedDirectsMap).forEach(key => {
+          mergedTreeNodes[key] = {
+            ...mergedTreeNodes[key],
+            ...loadedDirectsMap[key],
+            deposits: treeNodes[key]?.deposits || []
+          };
+        });
         const simulatedEvents = generateEventsList(
           addr,
           Number(basicInfo.registrationTime),
@@ -1205,28 +1270,11 @@ export default function Dashboard() {
           Number(boosterRate) / 100,
           Number(currentOneDayVal),
           Number(currentPerfOneDayVal),
-          loadedDirectsMap,
+          mergedTreeNodes,
           bonusesMapped
         ).map(evt => ({ ...evt, isSimulated: true }));
 
-        const ledger = dbLedger || [];
-        const hasRealROI = ledger.some(e => e.type === "roi" && !e.isSimulated);
-        const hasRealBooster = ledger.some(e => e.type === "booster_roi" && !e.isSimulated);
-        const hasRealLevelIncome = ledger.some(e => e.type === "level_income" && !e.isSimulated);
-        const hasRealLevelROI = ledger.some(e => e.type === "level_roi" && !e.isSimulated);
-        const hasRealPerf = ledger.some(e => ["perf_instant", "perf_daily", "perf_claim"].includes(e.type) && !e.isSimulated);
-
-        const allOnChainEvents = simulatedEvents.filter(evt => {
-          if (evt.type === "roi" && hasRealROI) return false;
-          if (evt.type === "booster_roi" && hasRealBooster) return false;
-          if (evt.type === "level_income" && hasRealLevelIncome) return false;
-          if (evt.type === "level_roi" && hasRealLevelROI) return false;
-          if (["perf_instant", "perf_daily", "perf_claim"].includes(evt.type) && hasRealPerf) return false;
-          return true;
-        });
-
-
-        setOnChainEvents([...deposits, ...withdrawals, ...allOnChainEvents]);
+        setOnChainEvents([...deposits, ...withdrawals, ...simulatedEvents]);
 
         // Sync everything to Convex
         try {
@@ -1238,7 +1286,7 @@ export default function Dashboard() {
             directs,
             userDeposits,
             userWithdrawals,
-            allOnChainEvents,
+            simulatedEvents,
             sessionTxDetails,
             incomeInfo,
             bonusesMapped
@@ -2167,20 +2215,68 @@ export default function Dashboard() {
     // Check which categories have real records in the database
     const hasRealROI = realEvents.some(e => e.type === "roi");
     const hasRealBooster = realEvents.some(e => e.type === "booster_roi");
-    const hasRealLevelIncome = realEvents.some(e => e.type === "level_income");
-    const hasRealLevelROI = realEvents.some(e => e.type === "level_roi");
     const hasRealPerf = realEvents.some(e => ["perf_instant", "perf_daily", "perf_claim"].includes(e.type));
 
+    // Check which specific downline addresses have real level income events in the database
+    const realLevelIncomeFromUsers = new Set(
+      realEvents
+        .filter(e => e.type === "level_income")
+        .map(e => e.fromUser.toLowerCase())
+    );
+
+    // Check which specific downline addresses have real level ROI events in the database
+    const realLevelROIFromUsers = new Set(
+      realEvents
+        .filter(e => e.type === "level_roi")
+        .map(e => e.fromUser.toLowerCase())
+    );
+
+    // Calculate how much real level income and level ROI we have
+    const realLevelIncomeSum = realEvents.filter(e => e.type === "level_income").reduce((acc, e) => acc + (e.amount || 0), 0);
+    const realLevelROISum = realEvents.filter(e => e.type === "level_roi").reduce((acc, e) => acc + (e.amount || 0), 0);
+
+    const targetLevelIncome = parseFloat(userData?.levelIncomeEarned || "0");
+    const targetLevelROI = parseFloat(userData?.levelROIEarned || "0");
+
+    let allowedSimulatedLevelIncome = Math.max(0, targetLevelIncome - realLevelIncomeSum);
+    let allowedSimulatedLevelROI = Math.max(0, targetLevelROI - realLevelROISum);
+
     // Filter local simulated events to only include categories that don't have real records in DB
-    const simulatedEvents = onChainEvents.filter(e => {
-      if (!e.isSimulated) return false;
-      if (e.type === "roi" && hasRealROI) return false;
-      if (e.type === "booster_roi" && hasRealBooster) return false;
-      if (e.type === "level_income" && hasRealLevelIncome) return false;
-      if (e.type === "level_roi" && hasRealLevelROI) return false;
-      if (["perf_instant", "perf_daily", "perf_claim"].includes(e.type) && hasRealPerf) return false;
-      return true;
-    });
+    const simulatedEvents = [];
+    
+    for (const e of onChainEvents) {
+      if (!e.isSimulated) continue;
+      
+      if (e.type === "roi" && hasRealROI) continue;
+      if (e.type === "booster_roi" && hasRealBooster) continue;
+      if (["perf_instant", "perf_daily", "perf_claim"].includes(e.type) && hasRealPerf) continue;
+
+      if (e.type === "level_income") {
+        if (realLevelIncomeFromUsers.has(e.fromUser.toLowerCase())) continue;
+        if (allowedSimulatedLevelIncome <= 0.01) continue;
+        
+        let amt = e.amount;
+        if (amt > allowedSimulatedLevelIncome) amt = allowedSimulatedLevelIncome;
+        
+        simulatedEvents.push({ ...e, amount: amt });
+        allowedSimulatedLevelIncome -= amt;
+        continue;
+      }
+
+      if (e.type === "level_roi") {
+        if (realLevelROIFromUsers.has(e.fromUser.toLowerCase())) continue;
+        if (allowedSimulatedLevelROI <= 0.01) continue;
+        
+        let amt = e.amount;
+        if (amt > allowedSimulatedLevelROI) amt = allowedSimulatedLevelROI;
+        
+        simulatedEvents.push({ ...e, amount: amt });
+        allowedSimulatedLevelROI -= amt;
+        continue;
+      }
+
+      simulatedEvents.push(e);
+    }
 
     const baseTxs = [...realEvents, ...deposits, ...withdrawals, ...simulatedEvents];
 

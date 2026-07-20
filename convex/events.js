@@ -18,6 +18,7 @@ export const syncOnChainEvents = mutation({
       blockNumber: v.number(),
       isSimulated: v.boolean(),
       tierIndex: v.optional(v.number()),
+      logIndex: v.optional(v.number()),
     })),
   },
   handler: async (ctx, args) => {
@@ -118,7 +119,8 @@ export const getLedger = query({
       txHash: e.txHash,
       blockNumber: e.blockNumber,
       isSimulated: e.isSimulated || false,
-      tierIndex: e.tierIndex
+      tierIndex: e.tierIndex,
+      logIndex: e.logIndex,
     }));
 
     const formattedDeposits = dbDeposits.map(d => ({
@@ -149,11 +151,19 @@ export const getLedger = query({
 
     const combined = [...formattedEvents, ...formattedDeposits, ...formattedWithdrawals];
 
-    // Deduplicate by txHash or composite key
+    // Deduplicate: use logIndex for real on-chain events, composite key for simulated/deposits/withdrawals
     const seenKeys = new Set();
     const uniqueList = [];
     for (const item of combined) {
-      const key = item.txHash ? item.txHash.toLowerCase() : `${item.type}_${item.timestamp}_${item.amount}`;
+      let key;
+      if (item.logIndex !== undefined && item.logIndex !== null) {
+        // Real on-chain events: txHash + logIndex is globally unique
+        key = `${item.txHash.toLowerCase()}|${item.logIndex}`;
+      } else if (item.txHash) {
+        key = `${item.txHash.toLowerCase()}|${item.type}|${(item.fromUser || "").toLowerCase()}|${item.level}|${item.amount}`;
+      } else {
+        key = `${item.type}_${item.timestamp}_${item.amount}_${(item.fromUser || "").toLowerCase()}`;
+      }
       if (!seenKeys.has(key)) {
         seenKeys.add(key);
         uniqueList.push(item);

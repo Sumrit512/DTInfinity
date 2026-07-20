@@ -64,7 +64,7 @@ function decodeAddress(hex) {
 }
 
 async function getLogs(contractAddress, fromBlock, toBlock, userTopic) {
-  const CHUNK = 2000; // safe chunk for BSC Testnet
+  const CHUNK = 2000; // safe chunk size to respect public RPC block range constraints
   const logs = [];
   for (let b = fromBlock; b <= toBlock; b += CHUNK) {
     const end = Math.min(b + CHUNK - 1, toBlock);
@@ -72,11 +72,12 @@ async function getLogs(contractAddress, fromBlock, toBlock, userTopic) {
       address: contractAddress.toLowerCase(),
       fromBlock: "0x" + b.toString(16),
       toBlock: "0x" + end.toString(16),
+      topics: [null, userTopic] // Filter by userTopic on RPC server!
     }];
     const result = await rpcRequestWithFallback("eth_getLogs", params);
     if (Array.isArray(result)) logs.push(...result);
     // Small delay between chunks to avoid rate limits
-    if (end < toBlock) await new Promise(r => setTimeout(r, 400));
+    if (end < toBlock) await new Promise(r => setTimeout(r, 100));
   }
   return logs;
 }
@@ -105,6 +106,11 @@ export const fetchAndSyncLogs = action({
       { instant: 1500, daily: 50 },
     ];
 
+    let startBlock = fromBlock;
+    if (startBlock <= 0) {
+      startBlock = Math.max(0, toBlock - 150000);
+    }
+
     const events = [];
 
     try {
@@ -117,7 +123,7 @@ export const fetchAndSyncLogs = action({
         TOPICS.BoosterROIAccumulated
       ];
 
-      const allLogs = await getLogs(contract, fromBlock, toBlock, userTopic);
+      const allLogs = await getLogs(contract, startBlock, toBlock, userTopic);
       
       for (const log of allLogs) {
         if (!log.topics || log.topics.length === 0) continue;
@@ -131,6 +137,7 @@ export const fetchAndSyncLogs = action({
         
         const txHash = log.transactionHash.toLowerCase();
         const blockNumber = Number(log.blockNumber);
+        const logIndex = Number(log.logIndex); // Unique index within the transaction
         const dataHex = log.data.startsWith("0x") ? log.data.slice(2) : log.data;
         
         if (topic0 === TOPICS.LevelIncomePaid) {
@@ -149,6 +156,7 @@ export const fetchAndSyncLogs = action({
             txHash,
             blockNumber,
             isSimulated: false,
+            logIndex,
           });
         } else if (topic0 === TOPICS.LevelROIPaid) {
           const downline = decodeAddress(log.topics[2]);
@@ -166,6 +174,7 @@ export const fetchAndSyncLogs = action({
             txHash,
             blockNumber,
             isSimulated: false,
+            logIndex,
           });
         } else if (topic0 === TOPICS.PerformanceBonusClaimed) {
           const tierIndex    = Number(decodeUint256(dataHex.slice(0, 64)));
@@ -184,6 +193,7 @@ export const fetchAndSyncLogs = action({
             blockNumber,
             isSimulated: false,
             tierIndex,
+            logIndex,
           });
         } else if (topic0 === TOPICS.PerformanceDailyPaid) {
           const amount = Number(decodeUint256(dataHex.slice(0, 64))) / 1e18;
@@ -199,6 +209,7 @@ export const fetchAndSyncLogs = action({
             txHash,
             blockNumber,
             isSimulated: false,
+            logIndex,
           });
         } else if (topic0 === TOPICS.ROIAccumulated) {
           const amount = Number(decodeUint256(dataHex.slice(0, 64))) / 1e18;
@@ -214,6 +225,7 @@ export const fetchAndSyncLogs = action({
             txHash,
             blockNumber,
             isSimulated: false,
+            logIndex,
           });
         } else if (topic0 === TOPICS.BoosterROIAccumulated) {
           const amount = Number(decodeUint256(dataHex.slice(0, 64))) / 1e18;
@@ -229,6 +241,7 @@ export const fetchAndSyncLogs = action({
             txHash,
             blockNumber,
             isSimulated: false,
+            logIndex,
           });
         }
       }

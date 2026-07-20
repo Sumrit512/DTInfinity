@@ -79,6 +79,7 @@ export default defineSchema({
     blockNumber: v.number(),
     isSimulated: v.boolean(),
     tierIndex: v.optional(v.number()),
+    logIndex: v.optional(v.number()), // RPC log index to uniquely identify events within the same tx
   }).index("by_contract_address_user_time", ["contractAddress", "user", "timestamp"])
     .index("by_txHash", ["txHash"]),
 });
