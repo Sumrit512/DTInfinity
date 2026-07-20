@@ -2208,14 +2208,22 @@ export default function Dashboard() {
     const ledger = dbLedger || [];
     
     // Extract real non-simulated events, deposits, and withdrawals from the Convex DB ledger
-    const realEvents = ledger.filter(e => e.type !== "deposit" && e.type !== "withdraw" && !e.isSimulated);
+    // EXCLUDE roi, booster_roi, and perf events because we ALWAYS want to use the simulated daily breakdown for these!
+    const realEvents = ledger.filter(e => 
+      e.type !== "deposit" && 
+      e.type !== "withdraw" && 
+      !e.isSimulated &&
+      e.type !== "roi" &&
+      e.type !== "booster_roi" &&
+      !["perf_instant", "perf_daily", "perf_claim"].includes(e.type)
+    );
     const deposits = ledger.filter(e => e.type === "deposit");
     const withdrawals = ledger.filter(e => e.type === "withdraw");
 
-    // Check which categories have real records in the database
-    const hasRealROI = realEvents.some(e => e.type === "roi");
-    const hasRealBooster = realEvents.some(e => e.type === "booster_roi");
-    const hasRealPerf = realEvents.some(e => ["perf_instant", "perf_daily", "perf_claim"].includes(e.type));
+    // Check which categories have real records in the database (Not needed anymore for these 3)
+    // const hasRealROI = realEvents.some(e => e.type === "roi");
+    // const hasRealBooster = realEvents.some(e => e.type === "booster_roi");
+    // const hasRealPerf = realEvents.some(e => ["perf_instant", "perf_daily", "perf_claim"].includes(e.type));
 
     // Check which specific downline addresses have real level income events in the database
     const realLevelIncomeFromUsers = new Set(
@@ -2247,9 +2255,8 @@ export default function Dashboard() {
     for (const e of onChainEvents) {
       if (!e.isSimulated) continue;
       
-      if (e.type === "roi" && hasRealROI) continue;
-      if (e.type === "booster_roi" && hasRealBooster) continue;
-      if (["perf_instant", "perf_daily", "perf_claim"].includes(e.type) && hasRealPerf) continue;
+      // We ALWAYS want to keep simulated ROI and Perf events to show the daily breakdown
+      // instead of the lumped sum from the real contract events.
 
       if (e.type === "level_income") {
         if (realLevelIncomeFromUsers.has(e.fromUser.toLowerCase())) continue;
