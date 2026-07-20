@@ -13,6 +13,8 @@ const TOPICS = {
 };
 
 const BSC_TESTNET_RPCS = [
+  process.env.ANKR_API_KEY ? `https://rpc.ankr.com/bsc_testnet_chapel/${process.env.ANKR_API_KEY}` : "https://rpc.ankr.com/bsc_testnet_chapel",
+  "https://bsc-testnet.public.blastapi.io",
   "https://data-seed-prebsc-1-s1.binance.org:8545",
   "https://data-seed-prebsc-2-s1.binance.org:8545",
   "https://data-seed-prebsc-1-s2.binance.org:8545",
@@ -61,7 +63,7 @@ function decodeAddress(hex) {
   return "0x" + hex.slice(-40).toLowerCase();
 }
 
-async function getLogs(contractAddress, fromBlock, toBlock, topic0, topic1) {
+async function getLogs(contractAddress, fromBlock, toBlock, userTopic) {
   const CHUNK = 2000; // safe chunk for BSC Testnet
   const logs = [];
   for (let b = fromBlock; b <= toBlock; b += CHUNK) {
@@ -70,7 +72,6 @@ async function getLogs(contractAddress, fromBlock, toBlock, topic0, topic1) {
       address: contractAddress.toLowerCase(),
       fromBlock: "0x" + b.toString(16),
       toBlock: "0x" + end.toString(16),
-      topics: topic1 ? [topic0, topic1] : [topic0],
     }];
     const result = await rpcRequestWithFallback("eth_getLogs", params);
     if (Array.isArray(result)) logs.push(...result);
@@ -107,185 +108,143 @@ export const fetchAndSyncLogs = action({
     const events = [];
 
     try {
-      // 1. LevelIncomePaid (upline=user indexed)
-      const levelIncomeLogs = await getLogs(contract, fromBlock, toBlock, TOPICS.LevelIncomePaid, userTopic);
-      // topics: [topic0, upline(indexed), downline(indexed)]
-      // data: level(32) + amount(32) + time(32)
-      for (const log of levelIncomeLogs) {
-        const downline = decodeAddress(log.topics[2]);
+      const combinedTopics = [
+        TOPICS.LevelIncomePaid,
+        TOPICS.LevelROIPaid,
+        TOPICS.PerformanceBonusClaimed,
+        TOPICS.PerformanceDailyPaid,
+        TOPICS.ROIAccumulated,
+        TOPICS.BoosterROIAccumulated
+      ];
+
+      const allLogs = await getLogs(contract, fromBlock, toBlock, userTopic);
+      
+      for (const log of allLogs) {
+        if (!log.topics || log.topics.length === 0) continue;
+        const topic0 = log.topics[0];
+        
+        // Only process the 6 income events
+        if (!combinedTopics.includes(topic0)) continue;
+        
+        // The user must be the recipient (topics[1]) for all 6 of these events
+        if (log.topics[1] !== userTopic) continue;
+        
+        const txHash = log.transactionHash.toLowerCase();
+        const blockNumber = Number(log.blockNumber);
         const dataHex = log.data.startsWith("0x") ? log.data.slice(2) : log.data;
-        const level   = Number(decodeUint256(dataHex.slice(0, 64)));
-        const amount  = Number(decodeUint256(dataHex.slice(64, 128))) / 1e18;
-        const time    = Number(decodeUint256(dataHex.slice(128, 192)));
-        events.push({
-          type: "level_income",
-          typeName: "Level Income",
-          fromUser: downline,
-          amount,
-          level: level.toString(),
-          timestamp: time,
-          status: "Completed",
-          txHash: log.transactionHash.toLowerCase(),
-          blockNumber: Number(log.blockNumber),
-          isSimulated: false,
-        });
+        
+        if (topic0 === TOPICS.LevelIncomePaid) {
+          const downline = decodeAddress(log.topics[2]);
+          const level   = Number(decodeUint256(dataHex.slice(0, 64)));
+          const amount  = Number(decodeUint256(dataHex.slice(64, 128))) / 1e18;
+          const time    = Number(decodeUint256(dataHex.slice(128, 192)));
+          events.push({
+            type: "level_income",
+            typeName: "Level Income",
+            fromUser: downline,
+            amount,
+            level: level.toString(),
+            timestamp: time,
+            status: "Completed",
+            txHash,
+            blockNumber,
+            isSimulated: false,
+          });
+        } else if (topic0 === TOPICS.LevelROIPaid) {
+          const downline = decodeAddress(log.topics[2]);
+          const level   = Number(decodeUint256(dataHex.slice(0, 64)));
+          const amount  = Number(decodeUint256(dataHex.slice(64, 128))) / 1e18;
+          const time    = Number(decodeUint256(dataHex.slice(128, 192)));
+          events.push({
+            type: "level_roi",
+            typeName: "Level ROI Matching",
+            fromUser: downline,
+            amount,
+            level: level.toString(),
+            timestamp: time,
+            status: "Completed",
+            txHash,
+            blockNumber,
+            isSimulated: false,
+          });
+        } else if (topic0 === TOPICS.PerformanceBonusClaimed) {
+          const tierIndex    = Number(decodeUint256(dataHex.slice(0, 64)));
+          const chooseInstant = Number(decodeUint256(dataHex.slice(64, 128))) !== 0;
+          const time         = Number(decodeUint256(dataHex.slice(128, 192)));
+          const tier = perfTiers[tierIndex] || { instant: 0, daily: 0 };
+          events.push({
+            type: chooseInstant ? "perf_instant" : "perf_claim",
+            typeName: chooseInstant ? "Performance Bonus (Instant)" : "Performance Bonus Claimed",
+            fromUser: "contract",
+            amount: chooseInstant ? tier.instant : 0,
+            level: "-",
+            timestamp: time,
+            status: "Completed",
+            txHash,
+            blockNumber,
+            isSimulated: false,
+            tierIndex,
+          });
+        } else if (topic0 === TOPICS.PerformanceDailyPaid) {
+          const amount = Number(decodeUint256(dataHex.slice(0, 64))) / 1e18;
+          const time   = Number(decodeUint256(dataHex.slice(64, 128)));
+          events.push({
+            type: "perf_daily",
+            typeName: "Performance Daily Salary",
+            fromUser: "contract",
+            amount,
+            level: "-",
+            timestamp: time,
+            status: "Completed",
+            txHash,
+            blockNumber,
+            isSimulated: false,
+          });
+        } else if (topic0 === TOPICS.ROIAccumulated) {
+          const amount = Number(decodeUint256(dataHex.slice(0, 64))) / 1e18;
+          const time   = Number(decodeUint256(dataHex.slice(64, 128)));
+          events.push({
+            type: "roi",
+            typeName: "Daily ROI Payout",
+            fromUser: "contract",
+            amount,
+            level: "-",
+            timestamp: time,
+            status: "Completed",
+            txHash,
+            blockNumber,
+            isSimulated: false,
+          });
+        } else if (topic0 === TOPICS.BoosterROIAccumulated) {
+          const amount = Number(decodeUint256(dataHex.slice(0, 64))) / 1e18;
+          const time   = Number(decodeUint256(dataHex.slice(64, 128)));
+          events.push({
+            type: "booster_roi",
+            typeName: "Booster ROI Payout",
+            fromUser: "contract",
+            amount,
+            level: "-",
+            timestamp: time,
+            status: "Completed",
+            txHash,
+            blockNumber,
+            isSimulated: false,
+          });
+        }
       }
     } catch (e) {
-      console.warn("fetchAndSyncLogs: LevelIncomePaid query failed:", e.message);
-    }
-
-    await new Promise(r => setTimeout(r, 500));
-
-    try {
-      // 2. LevelROIPaid (upline=user indexed)
-      const levelROILogs = await getLogs(contract, fromBlock, toBlock, TOPICS.LevelROIPaid, userTopic);
-      // topics: [topic0, upline(indexed), downline(indexed)]
-      // data: level(32) + amount(32) + time(32)
-      for (const log of levelROILogs) {
-        const downline = decodeAddress(log.topics[2]);
-        const dataHex = log.data.startsWith("0x") ? log.data.slice(2) : log.data;
-        const level   = Number(decodeUint256(dataHex.slice(0, 64)));
-        const amount  = Number(decodeUint256(dataHex.slice(64, 128))) / 1e18;
-        const time    = Number(decodeUint256(dataHex.slice(128, 192)));
-        events.push({
-          type: "level_roi",
-          typeName: "Level ROI Matching",
-          fromUser: downline,
-          amount,
-          level: level.toString(),
-          timestamp: time,
-          status: "Completed",
-          txHash: log.transactionHash.toLowerCase(),
-          blockNumber: Number(log.blockNumber),
-          isSimulated: false,
-        });
-      }
-    } catch (e) {
-      console.warn("fetchAndSyncLogs: LevelROIPaid query failed:", e.message);
-    }
-
-    await new Promise(r => setTimeout(r, 500));
-
-    try {
-      // 3. PerformanceBonusClaimed (user indexed)
-      const perfClaimedLogs = await getLogs(contract, fromBlock, toBlock, TOPICS.PerformanceBonusClaimed, userTopic);
-      // topics: [topic0, user(indexed)]
-      // data: tierIndex(32) + chooseInstant(32 as bool) + time(32)
-      for (const log of perfClaimedLogs) {
-        const dataHex = log.data.startsWith("0x") ? log.data.slice(2) : log.data;
-        const tierIndex    = Number(decodeUint256(dataHex.slice(0, 64)));
-        const chooseInstant = Number(decodeUint256(dataHex.slice(64, 128))) !== 0;
-        const time         = Number(decodeUint256(dataHex.slice(128, 192)));
-        const tier = perfTiers[tierIndex] || { instant: 0, daily: 0 };
-        events.push({
-          type: chooseInstant ? "perf_instant" : "perf_claim",
-          typeName: chooseInstant ? "Performance Bonus (Instant)" : "Performance Bonus Claimed",
-          fromUser: "contract",
-          amount: chooseInstant ? tier.instant : 0,
-          level: "-",
-          timestamp: time,
-          status: "Completed",
-          txHash: log.transactionHash.toLowerCase(),
-          blockNumber: Number(log.blockNumber),
-          isSimulated: false,
-          tierIndex,
-        });
-      }
-    } catch (e) {
-      console.warn("fetchAndSyncLogs: PerformanceBonusClaimed query failed:", e.message);
-    }
-
-    await new Promise(r => setTimeout(r, 500));
-
-    try {
-      // 4. PerformanceDailyPaid (user indexed)
-      const perfDailyLogs = await getLogs(contract, fromBlock, toBlock, TOPICS.PerformanceDailyPaid, userTopic);
-      // topics: [topic0, user(indexed)] — data: amount(32) + time(32)
-      for (const log of perfDailyLogs) {
-        const dataHex = log.data.startsWith("0x") ? log.data.slice(2) : log.data;
-        const amount = Number(decodeUint256(dataHex.slice(0, 64))) / 1e18;
-        const time   = Number(decodeUint256(dataHex.slice(64, 128)));
-        events.push({
-          type: "perf_daily",
-          typeName: "Performance Daily Salary",
-          fromUser: "contract",
-          amount,
-          level: "-",
-          timestamp: time,
-          status: "Completed",
-          txHash: log.transactionHash.toLowerCase(),
-          blockNumber: Number(log.blockNumber),
-          isSimulated: false,
-        });
-      }
-    } catch (e) {
-      console.warn("fetchAndSyncLogs: PerformanceDailyPaid query failed:", e.message);
-    }
-
-    await new Promise(r => setTimeout(r, 500));
-
-    try {
-      // 5. ROIAccumulated (user indexed)
-      const roiLogs = await getLogs(contract, fromBlock, toBlock, TOPICS.ROIAccumulated, userTopic);
-      // topics: [topic0, user(indexed)] — data: amount(32) + time(32)
-      for (const log of roiLogs) {
-        const dataHex = log.data.startsWith("0x") ? log.data.slice(2) : log.data;
-        const amount = Number(decodeUint256(dataHex.slice(0, 64))) / 1e18;
-        const time   = Number(decodeUint256(dataHex.slice(64, 128)));
-        events.push({
-          type: "roi",
-          typeName: "Daily ROI Payout",
-          fromUser: "contract",
-          amount,
-          level: "-",
-          timestamp: time,
-          status: "Completed",
-          txHash: log.transactionHash.toLowerCase(),
-          blockNumber: Number(log.blockNumber),
-          isSimulated: false,
-        });
-      }
-    } catch (e) {
-      console.warn("fetchAndSyncLogs: ROIAccumulated query failed:", e.message);
-    }
-
-    await new Promise(r => setTimeout(r, 500));
-
-    try {
-      // 6. BoosterROIAccumulated (user indexed)
-      const boosterLogs = await getLogs(contract, fromBlock, toBlock, TOPICS.BoosterROIAccumulated, userTopic);
-      // topics: [topic0, user(indexed)] — data: amount(32) + time(32)
-      for (const log of boosterLogs) {
-        const dataHex = log.data.startsWith("0x") ? log.data.slice(2) : log.data;
-        const amount = Number(decodeUint256(dataHex.slice(0, 64))) / 1e18;
-        const time   = Number(decodeUint256(dataHex.slice(64, 128)));
-        events.push({
-          type: "booster_roi",
-          typeName: "Booster ROI Payout",
-          fromUser: "contract",
-          amount,
-          level: "-",
-          timestamp: time,
-          status: "Completed",
-          txHash: log.transactionHash.toLowerCase(),
-          blockNumber: Number(log.blockNumber),
-          isSimulated: false,
-        });
-      }
-    } catch (e) {
-      console.warn("fetchAndSyncLogs: BoosterROIAccumulated query failed:", e.message);
+      console.warn("fetchAndSyncLogs: Consolidated query failed:", e.message);
     }
 
     console.log(`fetchAndSyncLogs: fetched ${events.length} events for ${user}`);
 
-    // Sync to the database (clears old, inserts fresh)
-    if (events.length > 0) {
-      await ctx.runMutation(api.events.syncOnChainEvents, {
-        contractAddress: contract,
-        user,
-        events,
-      });
-    }
+    // Sync to the database (clears overlapping old blocks, inserts fresh)
+    await ctx.runMutation(api.events.syncOnChainEvents, {
+      contractAddress: contract,
+      user,
+      fromBlock,
+      events,
+    });
 
     return { count: events.length, success: true };
   },

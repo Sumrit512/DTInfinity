@@ -5,6 +5,7 @@ export const syncOnChainEvents = mutation({
   args: {
     contractAddress: v.string(),
     user: v.string(),
+    fromBlock: v.optional(v.number()),
     events: v.array(v.object({
       type: v.string(),
       typeName: v.string(),
@@ -23,15 +24,27 @@ export const syncOnChainEvents = mutation({
     const contractLower = args.contractAddress.toLowerCase();
     const userLower = args.user.toLowerCase();
     
-    // Clear all existing events for this user and contract to prevent stale leftovers from previous testnet runs
-    const existingEvents = await ctx.db
-      .query("onChainEvents")
-      .withIndex("by_contract_address_user_time", (q) =>
-        q.eq("contractAddress", contractLower).eq("user", userLower)
-      )
-      .collect();
-    for (const doc of existingEvents) {
-      await ctx.db.delete(doc._id);
+    // Clear existing events for this user and contract ONLY if their blockNumber >= fromBlock
+    // This allows us to incrementally sync without wiping history!
+    const allEventsInTable = await ctx.db.query("onChainEvents").collect();
+    const userEvents = allEventsInTable.filter(doc => doc.user.toLowerCase() === userLower);
+    
+    for (const doc of userEvents) {
+      // Always clear simulated/generated events when syncing to prevent duplicate reporting
+      const isSimulatedOrGenerated = doc.isSimulated || 
+        doc.blockNumber === 0 || 
+        doc.txHash.startsWith("0x_gen_") || 
+        doc.txHash.startsWith("0x_evt_") ||
+        !doc.contractAddress ||
+        doc.contractAddress.toLowerCase() !== contractLower;
+        
+      if (isSimulatedOrGenerated) {
+        await ctx.db.delete(doc._id);
+      } 
+      // If a fromBlock is provided (real sync), clear real events from that block onwards
+      else if (args.fromBlock !== undefined && doc.blockNumber >= args.fromBlock) {
+        await ctx.db.delete(doc._id);
+      }
     }
 
     // Insert the current active list of events
@@ -70,6 +83,7 @@ export const getLedger = query({
     const contractLower = args.contractAddress.toLowerCase();
     const addr = args.address.toLowerCase();
 
+    // 1. Fetch on-chain events stored in DB
     const dbEvents = await ctx.db
       .query("onChainEvents")
       .withIndex("by_contract_address_user_time", (q) =>
@@ -77,8 +91,23 @@ export const getLedger = query({
       )
       .collect();
 
-    // Sort by timestamp descending (latest first)
-    const sorted = dbEvents.map(e => ({
+    // 2. Fetch deposits stored in DB
+    const dbDeposits = await ctx.db
+      .query("deposits")
+      .withIndex("by_contract_address_user", (q) =>
+        q.eq("contractAddress", contractLower).eq("user", addr)
+      )
+      .collect();
+
+    // 3. Fetch withdrawals stored in DB
+    const dbWithdrawals = await ctx.db
+      .query("withdrawals")
+      .withIndex("by_contract_address_user", (q) =>
+        q.eq("contractAddress", contractLower).eq("user", addr)
+      )
+      .collect();
+
+    const formattedEvents = dbEvents.map(e => ({
       type: e.type,
       typeName: e.typeName,
       fromUser: e.fromUser,
@@ -90,8 +119,50 @@ export const getLedger = query({
       blockNumber: e.blockNumber,
       isSimulated: e.isSimulated || false,
       tierIndex: e.tierIndex
-    })).sort((a, b) => b.timestamp - a.timestamp);
+    }));
 
-    return sorted;
+    const formattedDeposits = dbDeposits.map(d => ({
+      type: "deposit",
+      typeName: "Deposit",
+      fromUser: d.user,
+      amount: d.amount,
+      level: "-",
+      timestamp: d.time,
+      status: "Completed",
+      txHash: d.actualTxHash || d.txHash,
+      blockNumber: 0,
+      isSimulated: false,
+    }));
+
+    const formattedWithdrawals = dbWithdrawals.map(w => ({
+      type: "withdraw",
+      typeName: "Withdrawal",
+      fromUser: w.user,
+      amount: w.amount,
+      level: "-",
+      timestamp: w.time,
+      status: "Completed",
+      txHash: w.actualTxHash || w.txHash,
+      blockNumber: 0,
+      isSimulated: false,
+    }));
+
+    const combined = [...formattedEvents, ...formattedDeposits, ...formattedWithdrawals];
+
+    // Deduplicate by txHash or composite key
+    const seenKeys = new Set();
+    const uniqueList = [];
+    for (const item of combined) {
+      const key = item.txHash ? item.txHash.toLowerCase() : `${item.type}_${item.timestamp}_${item.amount}`;
+      if (!seenKeys.has(key)) {
+        seenKeys.add(key);
+        uniqueList.push(item);
+      }
+    }
+
+    // Sort by timestamp descending (latest first)
+    uniqueList.sort((a, b) => b.timestamp - a.timestamp);
+
+    return uniqueList;
   }
 });

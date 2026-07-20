@@ -1150,11 +1150,22 @@ export default function Dashboard() {
         // The action writes directly to onChainEvents table; dbLedger reactive query picks it up automatically.
         try {
           const latestBlock = Number(await provider.getBlockNumber());
-          const regFilter = dtContract.filters.Registered(addr);
-          const regEvents = await dtContract.queryFilter(regFilter, Math.max(0, latestBlock - 150000), latestBlock);
           let fromBlockVal = Math.max(0, latestBlock - 150000);
-          if (regEvents && regEvents.length > 0) {
-            fromBlockVal = regEvents[0].blockNumber;
+          
+          try {
+            const regFilter = dtContract.filters.Registered(addr);
+            const regEvents = await dtContract.queryFilter(regFilter, fromBlockVal, latestBlock);
+            if (regEvents && regEvents.length > 0) {
+              fromBlockVal = regEvents[0].blockNumber;
+            }
+          } catch (filterErr) {
+            console.log("Browser queryFilter for Registered: RPC restriction encountered, using deploymentBlock fallback.");
+            if (deploymentBlock) {
+              const parsedDepBlock = parseInt(deploymentBlock);
+              if (!isNaN(parsedDepBlock) && parsedDepBlock >= 0) {
+                fromBlockVal = parsedDepBlock;
+              }
+            }
           }
 
           // Build perfTiers array for the action
@@ -1177,33 +1188,42 @@ export default function Dashboard() {
           });
 
         } catch (blockErr) {
-          console.warn("Could not get block number for server-side log fetch:", blockErr.message);
+          console.warn("Could not get block number or execute server-side log fetch:", blockErr.message);
         }
 
         // While the server-side fetch runs in the background, use the math generator
         // for an immediate display. Once Convex writes to DB, dbLedger (reactive) updates automatically.
-        let allOnChainEvents = [];
-        if ((dbLedger || []).filter(e => !["deposit","withdraw"].includes(e.type) && !e.isSimulated).length > 0) {
-          // DB already has real (non-simulated) events from a previous server-side fetch — use them
-          allOnChainEvents = [];  // dbLedger already includes all events, set below
-        } else {
-          // Fall back to math generator for immediate display while server fetch runs
-          allOnChainEvents = generateEventsList(
-            addr,
-            Number(basicInfo.registrationTime),
-            ethers.formatUnits(basicInfo.totalDeposits || 0n, 18),
-            ethers.formatUnits(incomeInfo.dailyROIEarned || 0n, 18),
-            ethers.formatUnits(incomeInfo.roiBoosterEarned || 0n, 18),
-            ethers.formatUnits(incomeInfo.levelIncomeEarned || 0n, 18),
-            ethers.formatUnits(incomeInfo.levelROIEarned || 0n, 18),
-            ethers.formatUnits(incomeInfo.performanceBonusEarned || 0n, 18),
-            Number(boosterRate) / 100,
-            Number(currentOneDayVal),
-            Number(currentPerfOneDayVal),
-            loadedDirectsMap,
-            bonusesMapped
-          );
-        }
+        const simulatedEvents = generateEventsList(
+          addr,
+          Number(basicInfo.registrationTime),
+          ethers.formatUnits(basicInfo.totalDeposits || 0n, 18),
+          ethers.formatUnits((incomeInfo.dailyROIEarned || 0n) + (pending.pendingDaily || 0n), 18),
+          ethers.formatUnits((incomeInfo.roiBoosterEarned || 0n) + (pending.pendingBooster || 0n), 18),
+          ethers.formatUnits(incomeInfo.levelIncomeEarned || 0n, 18),
+          ethers.formatUnits(incomeInfo.levelROIEarned || 0n, 18),
+          ethers.formatUnits((incomeInfo.performanceBonusEarned || 0n) + (pending.pendingPerf || 0n), 18),
+          Number(boosterRate) / 100,
+          Number(currentOneDayVal),
+          Number(currentPerfOneDayVal),
+          loadedDirectsMap,
+          bonusesMapped
+        ).map(evt => ({ ...evt, isSimulated: true }));
+
+        const ledger = dbLedger || [];
+        const hasRealROI = ledger.some(e => e.type === "roi" && !e.isSimulated);
+        const hasRealBooster = ledger.some(e => e.type === "booster_roi" && !e.isSimulated);
+        const hasRealLevelIncome = ledger.some(e => e.type === "level_income" && !e.isSimulated);
+        const hasRealLevelROI = ledger.some(e => e.type === "level_roi" && !e.isSimulated);
+        const hasRealPerf = ledger.some(e => ["perf_instant", "perf_daily", "perf_claim"].includes(e.type) && !e.isSimulated);
+
+        const allOnChainEvents = simulatedEvents.filter(evt => {
+          if (evt.type === "roi" && hasRealROI) return false;
+          if (evt.type === "booster_roi" && hasRealBooster) return false;
+          if (evt.type === "level_income" && hasRealLevelIncome) return false;
+          if (evt.type === "level_roi" && hasRealLevelROI) return false;
+          if (["perf_instant", "perf_daily", "perf_claim"].includes(evt.type) && hasRealPerf) return false;
+          return true;
+        });
 
 
         setOnChainEvents([...deposits, ...withdrawals, ...allOnChainEvents]);
@@ -2133,16 +2153,36 @@ export default function Dashboard() {
     return sum;
   }, [dbTreeNodes, walletAddress, walletConnected, isRegistered]);
 
-  // Display-ready values calculated chronologically from txs list
-  const txs = useMemo(() => {
+  // Raw transaction ledger list (unmerged)
+  const unmergedTxs = useMemo(() => {
     if (!walletConnected || !isRegistered) return [];
 
-    let baseTxs = [];
-    if (dbLedger && dbLedger.length > 0) {
-      baseTxs = [...dbLedger];
-    } else {
-      baseTxs = [...onChainEvents];
-    }
+    const ledger = dbLedger || [];
+    
+    // Extract real non-simulated events, deposits, and withdrawals from the Convex DB ledger
+    const realEvents = ledger.filter(e => e.type !== "deposit" && e.type !== "withdraw" && !e.isSimulated);
+    const deposits = ledger.filter(e => e.type === "deposit");
+    const withdrawals = ledger.filter(e => e.type === "withdraw");
+
+    // Check which categories have real records in the database
+    const hasRealROI = realEvents.some(e => e.type === "roi");
+    const hasRealBooster = realEvents.some(e => e.type === "booster_roi");
+    const hasRealLevelIncome = realEvents.some(e => e.type === "level_income");
+    const hasRealLevelROI = realEvents.some(e => e.type === "level_roi");
+    const hasRealPerf = realEvents.some(e => ["perf_instant", "perf_daily", "perf_claim"].includes(e.type));
+
+    // Filter local simulated events to only include categories that don't have real records in DB
+    const simulatedEvents = onChainEvents.filter(e => {
+      if (!e.isSimulated) return false;
+      if (e.type === "roi" && hasRealROI) return false;
+      if (e.type === "booster_roi" && hasRealBooster) return false;
+      if (e.type === "level_income" && hasRealLevelIncome) return false;
+      if (e.type === "level_roi" && hasRealLevelROI) return false;
+      if (["perf_instant", "perf_daily", "perf_claim"].includes(e.type) && hasRealPerf) return false;
+      return true;
+    });
+
+    const baseTxs = [...realEvents, ...deposits, ...withdrawals, ...simulatedEvents];
 
     // Sort descending for final table list display
     baseTxs.sort((a, b) => {
@@ -2156,6 +2196,30 @@ export default function Dashboard() {
 
     return baseTxs;
   }, [dbLedger, onChainEvents, walletConnected, isRegistered]);
+
+  // Display-ready values calculated chronologically from txs list (merged Daily & Booster ROI)
+  const txs = useMemo(() => {
+    const mergedList = [];
+    const roiByTimestamp = {}; // Map of timestamp -> combined roi item
+
+    for (const item of unmergedTxs) {
+      if (item.type === "roi" || item.type === "booster_roi") {
+        if (!roiByTimestamp[item.timestamp]) {
+          roiByTimestamp[item.timestamp] = {
+            ...item,
+            type: "roi", // Combine under "roi" type
+            typeName: "Daily ROI Payout", // Named "Daily ROI Payout"
+            amount: 0,
+          };
+          mergedList.push(roiByTimestamp[item.timestamp]);
+        }
+        roiByTimestamp[item.timestamp].amount += item.amount;
+      } else {
+        mergedList.push(item);
+      }
+    }
+    return mergedList;
+  }, [unmergedTxs]);
 
   // Memoized filter for reports
   const filteredReportsTxs = useMemo(() => {
@@ -2289,11 +2353,42 @@ export default function Dashboard() {
 
   // Display-ready values calculated chronologically from txs list
   const statsToDisplay = useMemo(() => {
-    const dailyROI = parseFloat(userData.dailyROIEarned || "0");
-    const boosterROI = parseFloat(userData.roiBoosterEarned || "0");
-    const levelIncome = parseFloat(userData.levelIncomeEarned || "0");
-    const levelROI = parseFloat(userData.levelROIEarned || "0");
-    const performance = parseFloat(userData.performanceBonusEarned || "0");
+    // 1. Sum up from transaction ledger (includes both synced and simulated events)
+    let dailyROI = 0;
+    let boosterROI = 0;
+    let levelIncome = 0;
+    let levelROI = 0;
+    let performance = 0;
+
+    unmergedTxs.forEach(tx => {
+      if (tx.type === "roi") dailyROI += tx.amount;
+      else if (tx.type === "booster_roi") boosterROI += tx.amount;
+      else if (tx.type === "level_income") levelIncome += tx.amount;
+      else if (tx.type === "level_roi") levelROI += tx.amount;
+      else if (["perf_instant", "perf_daily", "perf_claim"].includes(tx.type)) performance += tx.amount;
+    });
+
+    // 2. Fallback to contract's historical earned totals
+    dailyROI = Math.max(dailyROI, parseFloat(userData.dailyROIEarned || "0"));
+    boosterROI = Math.max(boosterROI, parseFloat(userData.roiBoosterEarned || "0"));
+    levelIncome = Math.max(levelIncome, parseFloat(userData.levelIncomeEarned || "0"));
+    levelROI = Math.max(levelROI, parseFloat(userData.levelROIEarned || "0"));
+    performance = Math.max(performance, parseFloat(userData.performanceBonusEarned || "0"));
+
+    // 3. Add live pending/accruing rewards from smart contract ONLY if they are not already simulated in unmergedTxs
+    const hasRealROI = unmergedTxs.some(e => e.type === "roi" && !e.isSimulated);
+    const hasRealBooster = unmergedTxs.some(e => e.type === "booster_roi" && !e.isSimulated);
+    const hasRealPerf = unmergedTxs.some(e => ["perf_instant", "perf_daily", "perf_claim"].includes(e.type) && !e.isSimulated);
+
+    if (hasRealROI) {
+      dailyROI += displayPendingDaily;
+    }
+    if (hasRealBooster) {
+      boosterROI += displayPendingBooster;
+    }
+    if (hasRealPerf) {
+      performance += displayPendingPerf;
+    }
 
     const totalEarned = dailyROI + boosterROI + levelIncome + levelROI + performance;
     const totalAvailable = parseFloat(userData.claimableBalance || "0") +
@@ -2311,7 +2406,7 @@ export default function Dashboard() {
       totalEarned: totalEarned.toFixed(2),
       totalAvailable: totalAvailable.toFixed(2)
     };
-  }, [userData, displayPendingDaily, displayPendingBooster, displayPendingPerf]);
+  }, [unmergedTxs, userData, displayPendingDaily, displayPendingBooster, displayPendingPerf]);
 
   const displayDailyROI = parseFloat(statsToDisplay.dailyROI).toFixed(2);
   const displayBoosterROI = parseFloat(statsToDisplay.boosterROI).toFixed(2);
@@ -3515,7 +3610,7 @@ export default function Dashboard() {
                             ) : tx.fromUser}
                           </td>
                           <td style={{ padding: "12px 10px", fontSize: "13px", textAlign: "right", fontWeight: "600" }} className={isNegative ? "amt-neg" : "amt-pos"}>
-                            {isNegative ? "-" : "+"}{tx.amount.toFixed(2)} USDT
+                            {isNegative ? "-" : "+"}{tx.amount} USDT
                           </td>
                           <td style={{ padding: "12px 10px", fontSize: "13px", textAlign: "center" }} className="mono">{tx.level}</td>
                           <td style={{ padding: "12px 10px", fontSize: "13px" }} className="mono">{dateStr}</td>
