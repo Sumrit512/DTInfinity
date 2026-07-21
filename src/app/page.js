@@ -6,7 +6,7 @@ import { useQuery, useMutation, useAction } from "convex/react";
 import { api } from "../../convex/_generated/api.js";
 
 // Default contract addresses (placeholders that user can update in settings)
-const DEFAULT_DT_INFINITY_ADDRESS = "0xf0533aaca7ebe1ff267c8799e691f0309b42f729";
+const DEFAULT_DT_INFINITY_ADDRESS = "0xff9f3e42635585d4afe5d69332f6552b70fca5f3";
 const DEFAULT_USDT_ADDRESS = "0x0aB8c2DfE9aD2e2D3f58E6006884cda5e6f1E7B9";
 
 // Simple USDT ABI
@@ -357,7 +357,7 @@ export default function Dashboard() {
     if (typeof window !== "undefined") {
       setOrigin(window.location.origin);
       let savedDT = localStorage.getItem("DT_INFINITY_ADDRESS");
-      if (savedDT && savedDT.toLowerCase() !== "0xf0533aaca7ebe1ff267c8799e691f0309b42f729") {
+      if (savedDT && savedDT.toLowerCase() !== "0xff9f3e42635585d4afe5d69332f6552b70fca5f3") {
         localStorage.removeItem("DT_INFINITY_ADDRESS");
         savedDT = null;
       }
@@ -1163,20 +1163,31 @@ export default function Dashboard() {
           console.log("LOADED_DEPOSITS_RAW:", userDeposits);
           if (userDeposits && userDeposits.length > 0) {
             setLastDepositAmount(formatUSDT(userDeposits[userDeposits.length - 1].amount));
-          } else {
+            deposits = userDeposits.map((d, i) => ({
+              type: "deposit",
+              typeName: "Deposit",
+              fromUser: "Self",
+              amount: parseFloat(ethers.formatUnits(d.amount || 0n, 18)),
+              level: "-",
+              timestamp: Number(d.time || 0n),
+              status: "Completed",
+              txHash: `0x_dep_${addr}_${i}`,
+              blockNumber: 0
+            }));
+          } else if (basicInfo.totalDeposits && basicInfo.totalDeposits > 0n) {
             setLastDepositAmount(formatUSDT(basicInfo.totalDeposits));
+            deposits = [{
+              type: "deposit",
+              typeName: "Initial Deposit (Genesis/Admin)",
+              fromUser: "System/Genesis",
+              amount: parseFloat(ethers.formatUnits(basicInfo.totalDeposits, 18)),
+              level: "-",
+              timestamp: Number(basicInfo.registrationTime || 0n),
+              status: "Completed",
+              txHash: `0x_dep_genesis_${addr.toLowerCase()}`,
+              blockNumber: 0
+            }];
           }
-          deposits = userDeposits.map((d, i) => ({
-            type: "deposit",
-            typeName: "Deposit",
-            fromUser: "Self",
-            amount: parseFloat(ethers.formatUnits(d.amount || 0n, 18)),
-            level: "-",
-            timestamp: Number(d.time || 0n),
-            status: "Completed",
-            txHash: `0x_dep_${addr}_${i}`,
-            blockNumber: 0
-          }));
 
           userWithdrawals = await dtContract.getUserWithdrawals(addr);
           withdrawals = userWithdrawals.map((w, i) => ({
