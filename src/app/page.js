@@ -6,7 +6,7 @@ import { useQuery, useMutation, useAction } from "convex/react";
 import { api } from "../../convex/_generated/api.js";
 
 // Default contract addresses (placeholders that user can update in settings)
-const DEFAULT_DT_INFINITY_ADDRESS = "0xff9f3e42635585d4afe5d69332f6552b70fca5f3";
+const DEFAULT_DT_INFINITY_ADDRESS = "0x5af730a867eb633d26a1c8b75d485c115486e939";
 const DEFAULT_USDT_ADDRESS = "0x0aB8c2DfE9aD2e2D3f58E6006884cda5e6f1E7B9";
 
 // Simple USDT ABI
@@ -78,6 +78,14 @@ const formatCountdown = (secs) => {
     return `${days}d ${pad(hours)}h ${pad(minutes)}m ${pad(seconds)}s`;
   }
   return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
+};
+
+const formatTxAmount = (amt) => {
+  if (amt === undefined || amt === null) return "0";
+  const num = typeof amt === "number" ? amt : parseFloat(amt);
+  if (isNaN(num)) return "0";
+  const rounded = Math.round(num * 1e6) / 1e6;
+  return parseFloat(rounded.toFixed(4)).toString();
 };
 
 
@@ -357,7 +365,7 @@ export default function Dashboard() {
     if (typeof window !== "undefined") {
       setOrigin(window.location.origin);
       let savedDT = localStorage.getItem("DT_INFINITY_ADDRESS");
-      if (savedDT && savedDT.toLowerCase() !== "0xff9f3e42635585d4afe5d69332f6552b70fca5f3") {
+      if (savedDT && (savedDT.toLowerCase() === "0x858b5e656355401bb099c5120715d25761a8d1c2" || savedDT.toLowerCase() !== "0x5af730a867eb633d26a1c8b75d485c115486e939")) {
         localStorage.removeItem("DT_INFINITY_ADDRESS");
         savedDT = null;
       }
@@ -627,143 +635,111 @@ export default function Dashboard() {
     oneDayVal,
     perfOneDayVal,
     treeNodes,
-    activeBonuses
+    activeBonuses,
+    userDeposits = []
   ) {
     const regTime = Number(registrationTime || 0);
     if (regTime === 0) return [];
 
     const ONE_DAY_SECS = Number(oneDayVal) || 86400;
     const PERF_ONE_DAY_SECS = Number(perfOneDayVal) || 86400;
+    const now = Math.floor(Date.now() / 1000);
 
-    let generated = [];
-
-    // 1. Generate Daily ROI Payouts
     const targetDailyROI = parseFloat(dailyROIEarned) || 0;
-    if (targetDailyROI > 0) {
-      const dailyRoiRate = parseFloat(totalDeposits) * 0.005; // 0.5%
-      let dailyROIAccumulated = 0;
-      let day = 1;
-      while (dailyROIAccumulated < targetDailyROI - 0.001) {
-        const payoutTime = regTime + day * ONE_DAY_SECS;
-        let amt = dailyRoiRate;
-        if (dailyROIAccumulated + amt > targetDailyROI) {
-          amt = targetDailyROI - dailyROIAccumulated;
-        }
-        generated.push({
-          type: "roi",
-          typeName: "Daily ROI Payout",
-          fromUser: "Contract",
-          amount: amt,
-          level: "-",
-          timestamp: payoutTime,
-          status: "Completed",
-          txHash: `0x_gen_roi_${regTime}_${day}`,
-          blockNumber: 0
-        });
-        dailyROIAccumulated += amt;
-        day++;
-      }
-    }
-
-    // 2. Generate Booster ROI Payouts
     const targetBoosterROI = parseFloat(roiBoosterEarned) || 0;
-    if (targetBoosterROI > 0) {
-      const rate = parseFloat(boosterRate) || 0.5;
-      const boosterRoiRate = parseFloat(totalDeposits) * Math.max(0, (rate / 100) - 0.005);
-      if (boosterRoiRate > 0) {
-        let boosterROIAccumulated = 0;
-        let day = 1;
-        while (boosterROIAccumulated < targetBoosterROI - 0.001) {
-          const payoutTime = regTime + day * ONE_DAY_SECS;
-          let amt = boosterRoiRate;
-          if (boosterROIAccumulated + amt > targetBoosterROI) {
-            amt = targetBoosterROI - boosterROIAccumulated;
-          }
-          generated.push({
-            type: "booster_roi",
-            typeName: "Booster ROI Payout",
-            fromUser: "Contract",
-            amount: amt,
-            level: "-",
-            timestamp: payoutTime,
-            status: "Completed",
-            txHash: `0x_gen_booster_${regTime}_${day}`,
-            blockNumber: 0
-          });
-          boosterROIAccumulated += amt;
-          day++;
-        }
-      } else {
-        generated.push({
-          type: "booster_roi",
-          typeName: "Booster ROI Payout",
-          fromUser: "Contract",
-          amount: targetBoosterROI,
-          level: "-",
-          timestamp: regTime + ONE_DAY_SECS,
-          status: "Completed",
-          txHash: `0x_gen_booster_fallback_${regTime}`,
-          blockNumber: 0
-        });
-      }
-    }
-
-    // 3. Generate Performance Daily Salaries
-    const targetPerf = parseFloat(performanceBonusEarned) || 0;
-    if (targetPerf > 0) {
-      let perfAccumulated = 0;
-      let day = 1;
-      
-      if (activeBonuses && activeBonuses.length > 0) {
-        const earliestStart = Math.min(...activeBonuses.map(b => b.startTime));
-        while (perfAccumulated < targetPerf - 0.001) {
-          const payoutTime = earliestStart + day * PERF_ONE_DAY_SECS;
-          let totalDailyRate = 0;
-          activeBonuses.forEach(b => {
-            if (payoutTime >= b.startTime && payoutTime <= b.endTime) {
-              totalDailyRate += b.dailyRate;
-            }
-          });
-          if (totalDailyRate === 0) {
-            totalDailyRate = activeBonuses[0].dailyRate;
-          }
-          let amt = totalDailyRate;
-          if (perfAccumulated + amt > targetPerf) {
-            amt = targetPerf - perfAccumulated;
-          }
-          generated.push({
-            type: "perf_daily",
-            typeName: "Performance Daily Salary",
-            fromUser: "Contract",
-            amount: amt,
-            level: "-",
-            timestamp: payoutTime,
-            status: "Completed",
-            txHash: `0x_gen_perf_daily_${earliestStart}_${day}`,
-            blockNumber: 0
-          });
-          perfAccumulated += amt;
-          day++;
-        }
-      } else {
-        generated.push({
-          type: "perf_daily",
-          typeName: "Performance Daily Salary",
-          fromUser: "Contract",
-          amount: targetPerf,
-          level: "-",
-          timestamp: regTime + PERF_ONE_DAY_SECS,
-          status: "Completed",
-          txHash: `0x_gen_perf_fallback_${regTime}`,
-          blockNumber: 0
-        });
-      }
-    }
-
-    // 4. Generate Level Income events from downline deposits
     const targetLevelIncome = parseFloat(levelIncomeEarned) || 0;
-    let levelIncomeAccumulated = 0;
-    
+    const targetLevelROI = parseFloat(levelROIEarned) || 0;
+    const targetPerf = parseFloat(performanceBonusEarned) || 0;
+
+    // 1. Prepare user deposits timeline (sorted ascending)
+    let sortedDeposits = [];
+    if (userDeposits && userDeposits.length > 0) {
+      sortedDeposits = userDeposits.map((d, i) => ({
+        amount: typeof d.amount === "number" ? d.amount : parseFloat(ethers.formatUnits(d.amount || 0n, 18)),
+        timestamp: Number(d.time || d.timestamp || regTime)
+      })).sort((a, b) => a.timestamp - b.timestamp);
+    } else {
+      const totDepNum = parseFloat(totalDeposits) || 0;
+      if (totDepNum > 0) {
+        sortedDeposits = [{ amount: totDepNum, timestamp: regTime }];
+      }
+    }
+
+    if (sortedDeposits.length === 0) {
+      const totDepNum = parseFloat(totalDeposits) || 0;
+      sortedDeposits = [{ amount: totDepNum, timestamp: regTime }];
+    }
+
+    // 2. Prepare Directs & Tree Nodes data for booster rate & level income calculation
+    const sponsorAddrLower = addr ? addr.toLowerCase() : "";
+    const sponsorNode = treeNodes ? treeNodes[sponsorAddrLower] : null;
+    const directAddrs = sponsorNode?.children || [];
+
+    const directsData = [];
+    directAddrs.forEach(childAddr => {
+      const childNode = treeNodes ? treeNodes[childAddr.toLowerCase()] : null;
+      if (childNode) {
+        directsData.push({
+          address: childAddr,
+          registrationTime: Number(childNode.registrationTime || 0),
+          totalDeposits: parseFloat(childNode.totalDeposits || 0)
+        });
+      }
+    });
+
+    function getActiveDepositAtTime(timestamp) {
+      let depSum = 0;
+      for (const dep of sortedDeposits) {
+        if (dep.timestamp <= timestamp) {
+          depSum += dep.amount;
+        }
+      }
+      return depSum;
+    }
+
+    function getBoosterRateAtTime(timestamp) {
+      let refs5 = 0, refs10 = 0, refs15 = 0, refs20 = 0, refs25 = 0;
+      const currentSponsorDep = getActiveDepositAtTime(timestamp);
+
+      for (const d of directsData) {
+        if (d.registrationTime > timestamp) continue;
+        if (d.registrationTime > regTime + 25 * ONE_DAY_SECS) continue;
+
+        if (d.totalDeposits >= currentSponsorDep && currentSponsorDep > 0) {
+          if (d.registrationTime >= regTime) {
+            const diff = d.registrationTime - regTime;
+            if (diff <= 5 * ONE_DAY_SECS) refs5++;
+            if (diff <= 10 * ONE_DAY_SECS) refs10++;
+            if (diff <= 15 * ONE_DAY_SECS) refs15++;
+            if (diff <= 20 * ONE_DAY_SECS) refs20++;
+            if (diff <= 25 * ONE_DAY_SECS) refs25++;
+          }
+        }
+      }
+
+      if (refs25 >= 10) return 400;
+      if (refs20 >= 8) return 250;
+      if (refs15 >= 6) return 200;
+      if (refs10 >= 4) return 150;
+      if (refs5 >= 2) return 100;
+      return 50;
+    }
+
+    // 3. Build Candidate Event Timeline
+    const candidateEvents = [];
+
+    // Candidate 1: User Deposits (to trigger cap updates in state machine)
+    sortedDeposits.forEach((dep, idx) => {
+      candidateEvents.push({
+        type: "user_deposit",
+        timestamp: dep.timestamp,
+        amount: dep.amount,
+        sortPriority: 1
+      });
+    });
+
+    // Candidate 2: Level Income from downline deposits
+    let candidateLevelIncSum = 0;
     if (treeNodes && Object.keys(treeNodes).length > 0) {
       Object.keys(treeNodes).forEach(childAddr => {
         if (childAddr.toLowerCase() === addr.toLowerCase()) return;
@@ -776,7 +752,7 @@ export default function Dashboard() {
               depsToUse = [{ amount: tDep, timestamp: node.registrationTime || regTime }];
             }
           }
-          
+
           if (depsToUse && depsToUse.length > 0) {
             depsToUse.forEach((dep, dIdx) => {
               let level = 1;
@@ -785,25 +761,32 @@ export default function Dashboard() {
                 current = treeNodes[current.sponsor.toLowerCase()];
                 level++;
               }
-              if (level <= 5 && levelIncomeAccumulated < targetLevelIncome - 0.01) {
+              if (level <= 5) {
                 const levelPct = [0.05, 0.02, 0.01, 0.01, 0.01][level - 1] || 0;
-                let amt = dep.amount * levelPct;
-                if (levelIncomeAccumulated + amt > targetLevelIncome) {
-                  amt = targetLevelIncome - levelIncomeAccumulated;
-                }
-                if (amt > 0) {
-                  generated.push({
-                    type: "level_income",
-                    typeName: "Level Income",
-                    fromUser: childAddr,
-                    amount: amt,
-                    level: level.toString(),
-                    timestamp: dep.timestamp,
-                    status: "Completed",
-                    txHash: `0x_gen_lvl_inc_${childAddr}_${dIdx}_${dep.timestamp}`,
-                    blockNumber: 0
-                  });
-                  levelIncomeAccumulated += amt;
+                const depAmt = typeof dep.amount === "number" ? dep.amount : parseFloat(dep.amount || 0);
+                const depTime = Number(dep.timestamp || node.registrationTime || regTime);
+                const totalAmt = depAmt * levelPct;
+                if (totalAmt > 0) {
+                  let remAmt = totalAmt;
+                  let partIdx = 0;
+                  const maxVal = 500;
+                  while (remAmt > 0.001) {
+                    const partAmt = Math.min(maxVal, remAmt);
+                    const offsetTime = depTime + (partIdx * 60);
+                    candidateEvents.push({
+                      type: "candidate_level_income",
+                      typeName: "Level Income",
+                      fromUser: childAddr,
+                      amount: Math.round(partAmt * 1e8) / 1e8,
+                      level: level.toString(),
+                      timestamp: offsetTime,
+                      sortPriority: 2,
+                      txHash: `0x_gen_lvl_inc_${childAddr.toLowerCase()}_${dIdx}_${offsetTime}_${partIdx}`
+                    });
+                    candidateLevelIncSum += partAmt;
+                    remAmt = Math.round((remAmt - partAmt) * 1e8) / 1e8;
+                    partIdx++;
+                  }
                 }
               }
             });
@@ -812,8 +795,8 @@ export default function Dashboard() {
       });
     }
 
-    if (levelIncomeAccumulated < targetLevelIncome - 0.01) {
-      const diff = targetLevelIncome - levelIncomeAccumulated;
+     if (targetLevelIncome > 0 && candidateLevelIncSum < targetLevelIncome - 0.01) {
+      const diff = targetLevelIncome - candidateLevelIncSum;
       let fallbackL1Addr = "Downline";
       if (treeNodes && Object.keys(treeNodes).length > 0) {
         const l1Child = Object.keys(treeNodes).find(childAddr => {
@@ -824,25 +807,74 @@ export default function Dashboard() {
           fallbackL1Addr = l1Child;
         }
       }
-      generated.push({
-        type: "level_income",
-        typeName: "Level Income",
-        fromUser: fallbackL1Addr,
-        amount: diff,
-        level: "1",
-        timestamp: regTime + 1800,
-        status: "Completed",
-        txHash: `0x_gen_lvl_inc_fallback_${regTime}`,
-        blockNumber: 0
+
+      // Unbundle level income into individual package deposit commission entries (max 500 USDT per entry)
+      let remDiff = diff;
+      let incIdx = 0;
+      const maxPerEntry = 500;
+      while (remDiff > 0.001 && incIdx < 100) {
+        const entryAmt = Math.min(maxPerEntry, remDiff);
+        candidateEvents.push({
+          type: "candidate_level_income",
+          typeName: "Level Income",
+          fromUser: fallbackL1Addr,
+          amount: Math.round(entryAmt * 1e8) / 1e8,
+          level: "1",
+          timestamp: regTime + 480 + (incIdx * 10),
+          sortPriority: 2,
+          txHash: `0x_gen_lvl_inc_unbundled_${regTime}_${incIdx}`
+        });
+        remDiff = Math.round((remDiff - entryAmt) * 1e8) / 1e8;
+        incIdx++;
+      }
+    }
+
+    // Candidate 3: Daily & Booster ROI periodic intervals
+    const maxRoiSimulationTime = Math.max(now, regTime + 1000 * ONE_DAY_SECS);
+    let roiDay = 1;
+    while (true) {
+      const payoutTime = regTime + roiDay * ONE_DAY_SECS;
+      if (payoutTime > maxRoiSimulationTime || roiDay > 2000) break;
+
+      candidateEvents.push({
+        type: "candidate_roi",
+        day: roiDay,
+        timestamp: payoutTime,
+        sortPriority: 3
+      });
+      roiDay++;
+    }
+
+    // Candidate 4: Performance Daily Salary periodic intervals
+    if (activeBonuses && activeBonuses.length > 0) {
+      activeBonuses.forEach((bonus, bIdx) => {
+        const streamStart = bonus.startTime;
+        const streamEnd = bonus.endTime > 0 ? bonus.endTime : streamStart + 30 * PERF_ONE_DAY_SECS;
+        let day = 1;
+        while (true) {
+          const salaryTime = streamStart + day * PERF_ONE_DAY_SECS;
+          if (salaryTime > streamEnd + 10 * PERF_ONE_DAY_SECS && day > 30) break;
+          if (day > 500) break;
+
+          candidateEvents.push({
+            type: "candidate_perf_daily",
+            bIdx: bIdx,
+            day: day,
+            dailyRate: bonus.dailyRate,
+            startTime: streamStart,
+            endTime: streamEnd,
+            tierIndex: bonus.tierIndex,
+            timestamp: salaryTime,
+            sortPriority: 4
+          });
+          day++;
+        }
       });
     }
 
-    // 5. Generate Level ROI events
-    const targetLevelROI = parseFloat(levelROIEarned) || 0;
-    let levelROIAccumulated = 0;
-    
-    if (targetLevelROI > 0) {
-      // First, get all downlines up to level 20 and their expected daily contribution
+    // Candidate 5: Level ROI Matching
+    let candidateLevelROISum = 0;
+    if (targetLevelROI > 0 && treeNodes) {
       const downlineContributions = [];
       const levelROIPct = [
         0.15, 0.10, 0.05, 0.05, 0.05,
@@ -851,71 +883,354 @@ export default function Dashboard() {
         0.02, 0.02, 0.02, 0.02, 0.02
       ];
 
-      if (treeNodes) {
-        Object.keys(treeNodes).forEach(childAddr => {
-          if (childAddr.toLowerCase() === addr.toLowerCase()) return;
-          const node = treeNodes[childAddr];
-          const tDep = parseFloat(node.totalDeposits) || 0;
-          if (tDep > 0) {
-            let level = 1;
-            let current = node;
-            while (current && current.sponsor && current.sponsor.toLowerCase() !== addr.toLowerCase() && level < 20) {
-              current = treeNodes[current.sponsor.toLowerCase()];
-              level++;
-            }
-            const expectedDaily = tDep * 0.004 * (levelROIPct[level - 1] || 0);
-            if (expectedDaily > 0) {
-              downlineContributions.push({ addr: childAddr, level, expectedDaily });
-            }
+      Object.keys(treeNodes).forEach(childAddr => {
+        if (childAddr.toLowerCase() === addr.toLowerCase()) return;
+        const node = treeNodes[childAddr];
+        const tDep = parseFloat(node.totalDeposits) || 0;
+        if (tDep > 0) {
+          let level = 1;
+          let current = node;
+          while (current && current.sponsor && current.sponsor.toLowerCase() !== addr.toLowerCase() && level < 20) {
+            current = treeNodes[current.sponsor.toLowerCase()];
+            level++;
           }
-        });
-      }
+          const expectedDaily = tDep * 0.005 * (levelROIPct[level - 1] || 0);
+          if (expectedDaily > 0) {
+            downlineContributions.push({ addr: childAddr, level, expectedDaily, childRegTime: Number(node.registrationTime || regTime) });
+          }
+        }
+      });
 
-      // If we found downlines, distribute remaining targetLevelROI among them realistically
       let dayOffset = 1;
       let iteration = 0;
-      
-      while (levelROIAccumulated < targetLevelROI - 0.01 && downlineContributions.length > 0 && iteration < 500) {
-        for (const dc of downlineContributions) {
-          if (levelROIAccumulated >= targetLevelROI - 0.01) break;
-          const payoutTime = regTime + dayOffset * ONE_DAY_SECS;
-          let amt = dc.expectedDaily;
-          if (levelROIAccumulated + amt > targetLevelROI) {
-            amt = targetLevelROI - levelROIAccumulated;
-          }
-          if (amt > 0) {
-            generated.push({
-              type: "level_roi",
-              typeName: "Level ROI Matching",
-              fromUser: dc.addr,
-              amount: amt,
-              level: dc.level.toString(),
-              timestamp: payoutTime + (Math.random() * 3600), // slight stagger
-              status: "Completed",
-              txHash: `0x_gen_lvl_roi_${dc.addr}_${dayOffset}`,
-              blockNumber: 0
-            });
-            levelROIAccumulated += amt;
-          }
+      while (candidateLevelROISum < targetLevelROI - 0.01 && downlineContributions.length > 0 && iteration < 200) {
+        for (let cIdx = 0; cIdx < downlineContributions.length; cIdx++) {
+          const dc = downlineContributions[cIdx];
+          const payoutTime = Math.max(dc.childRegTime, regTime) + dayOffset * ONE_DAY_SECS + (cIdx * 10);
+          candidateEvents.push({
+            type: "candidate_level_roi",
+            typeName: "Level ROI Matching",
+            fromUser: dc.addr,
+            amount: dc.expectedDaily,
+            level: dc.level.toString(),
+            timestamp: payoutTime,
+            sortPriority: 2,
+            txHash: `0x_gen_lvl_roi_${dc.addr.toLowerCase()}_${dayOffset}_${dc.level}`
+          });
+          candidateLevelROISum += dc.expectedDaily;
         }
         dayOffset++;
         iteration++;
       }
-      
-      // If still missing (e.g. no downlines found or target very high), use a final fallback
-      if (levelROIAccumulated < targetLevelROI - 0.01) {
-        const diff = targetLevelROI - levelROIAccumulated;
+
+      if (candidateLevelROISum < targetLevelROI - 0.01) {
+        const diff = targetLevelROI - candidateLevelROISum;
+        let remLvlRoi = diff;
+        let roiIdx = 0;
+        const maxPerLvlRoiEntry = 2.5; // Unbundle into max 2.5 USDT per matching claim
+        while (remLvlRoi > 0.001 && roiIdx < 100) {
+          const entryAmt = Math.min(maxPerLvlRoiEntry, remLvlRoi);
+          candidateEvents.push({
+            type: "candidate_level_roi",
+            typeName: "Level ROI Matching",
+            fromUser: "Downline",
+            amount: Math.round(entryAmt * 1e8) / 1e8,
+            level: "1",
+            timestamp: regTime + 1080 + (roiIdx * 10),
+            sortPriority: 2,
+            txHash: `0x_gen_lvl_roi_unbundled_${regTime}_${roiIdx}`
+          });
+          remLvlRoi = Math.round((remLvlRoi - entryAmt) * 1e8) / 1e8;
+          roiIdx++;
+        }
+      }
+    }
+
+    // 4. Sort candidates strictly ascending by timestamp & priority
+    candidateEvents.sort((a, b) => {
+      if (a.timestamp !== b.timestamp) {
+        return a.timestamp - b.timestamp;
+      }
+      return a.sortPriority - b.sortPriority;
+    });
+
+    // 5. Run Unified Chronological State Machine Simulation
+    let currentDeposit = 0;
+    let accumulatedDailyROI = 0;
+    let accumulatedBoosterROI = 0;
+    let accumulatedLevelIncome = 0;
+    let accumulatedLevelROI = 0;
+    let accumulatedPerf = 0;
+    let cumulativeTotalEarned = 0;
+
+    const generated = [];
+
+    for (const evt of candidateEvents) {
+      if (evt.type === "user_deposit") {
+        currentDeposit += evt.amount;
+        continue;
+      }
+
+      const maxRoiCap = currentDeposit * 2.2;
+      const maxNetworkCap = currentDeposit * 4.0;
+
+      const remRoiCap = Math.max(0, maxRoiCap - (accumulatedDailyROI + accumulatedBoosterROI));
+      const remNetCap = Math.max(0, maxNetworkCap - cumulativeTotalEarned);
+
+      if (evt.type === "candidate_level_income") {
+        if (targetLevelIncome > 0 && accumulatedLevelIncome >= targetLevelIncome - 0.001) continue;
+
+        let amt = evt.amount;
+        if (targetLevelIncome > 0 && accumulatedLevelIncome + amt > targetLevelIncome) {
+          amt = targetLevelIncome - accumulatedLevelIncome;
+        }
+        amt = Math.min(amt, remNetCap);
+        amt = Math.round(amt * 1e8) / 1e8;
+
+        if (amt > 0) {
+          generated.push({
+            type: "level_income",
+            typeName: evt.typeName,
+            fromUser: evt.fromUser,
+            amount: amt,
+            level: evt.level,
+            timestamp: evt.timestamp,
+            status: "Completed",
+            txHash: evt.txHash,
+            blockNumber: 0
+          });
+          accumulatedLevelIncome += amt;
+          cumulativeTotalEarned += amt;
+        }
+        continue;
+      }
+
+      if (evt.type === "candidate_level_roi") {
+        if (targetLevelROI > 0 && accumulatedLevelROI >= targetLevelROI - 0.001) continue;
+
+        let amt = evt.amount;
+        if (targetLevelROI > 0 && accumulatedLevelROI + amt > targetLevelROI) {
+          amt = targetLevelROI - accumulatedLevelROI;
+        }
+        amt = Math.min(amt, remNetCap);
+        amt = Math.round(amt * 1e8) / 1e8;
+
+        if (amt > 0) {
+          generated.push({
+            type: "level_roi",
+            typeName: evt.typeName,
+            fromUser: evt.fromUser,
+            amount: amt,
+            level: evt.level,
+            timestamp: evt.timestamp,
+            status: "Completed",
+            txHash: evt.txHash,
+            blockNumber: 0
+          });
+          accumulatedLevelROI += amt;
+          cumulativeTotalEarned += amt;
+        }
+        continue;
+      }
+
+      if (evt.type === "candidate_roi") {
+        const rateBps = getBoosterRateAtTime(evt.timestamp);
+
+        if (targetDailyROI > 0 && accumulatedDailyROI < targetDailyROI - 0.0001) {
+          let baseAmt = (currentDeposit * 50) / 10000;
+          if (accumulatedDailyROI + baseAmt > targetDailyROI) {
+            baseAmt = targetDailyROI - accumulatedDailyROI;
+          }
+          const curRemRoiCap = Math.max(0, maxRoiCap - cumulativeTotalEarned);
+          const curRemNetCap = Math.max(0, maxNetworkCap - cumulativeTotalEarned);
+          baseAmt = Math.min(baseAmt, curRemRoiCap, curRemNetCap);
+          baseAmt = Math.round(baseAmt * 1e8) / 1e8;
+
+          if (baseAmt > 0) {
+            generated.push({
+              type: "roi",
+              typeName: "Daily ROI Payout",
+              fromUser: "Contract",
+              amount: baseAmt,
+              level: "-",
+              timestamp: evt.timestamp,
+              status: "Completed",
+              txHash: `0x_gen_roi_${regTime}_${evt.day}`,
+              blockNumber: 0
+            });
+            accumulatedDailyROI += baseAmt;
+            cumulativeTotalEarned += baseAmt;
+          }
+        }
+
+        if (targetBoosterROI > 0 && accumulatedBoosterROI < targetBoosterROI - 0.0001) {
+          const boosterBps = Math.max(0, rateBps - 50);
+          let boosterAmt = (currentDeposit * boosterBps) / 10000;
+          if (boosterAmt > 0) {
+            if (accumulatedBoosterROI + boosterAmt > targetBoosterROI) {
+              boosterAmt = targetBoosterROI - accumulatedBoosterROI;
+            }
+            const curRemRoiCap = Math.max(0, maxRoiCap - cumulativeTotalEarned);
+            const curRemNetCap = Math.max(0, maxNetworkCap - cumulativeTotalEarned);
+            boosterAmt = Math.min(boosterAmt, curRemRoiCap, curRemNetCap);
+            boosterAmt = Math.round(boosterAmt * 1e8) / 1e8;
+
+            if (boosterAmt > 0) {
+              generated.push({
+                type: "booster_roi",
+                typeName: "Booster ROI Payout",
+                fromUser: "Contract",
+                amount: boosterAmt,
+                level: "-",
+                timestamp: evt.timestamp,
+                status: "Completed",
+                txHash: `0x_gen_booster_${regTime}_${evt.day}`,
+                blockNumber: 0
+              });
+              accumulatedBoosterROI += boosterAmt;
+              cumulativeTotalEarned += boosterAmt;
+            }
+          }
+        }
+        continue;
+      }
+
+      if (evt.type === "candidate_perf_daily") {
+        if (targetPerf > 0 && accumulatedPerf >= targetPerf - 0.001) continue;
+
+        let amt = evt.dailyRate;
+        if (targetPerf > 0 && accumulatedPerf + amt > targetPerf) {
+          amt = targetPerf - accumulatedPerf;
+        }
+
+        const curRemNetCap = Math.max(0, maxNetworkCap - cumulativeTotalEarned);
+        amt = Math.min(amt, curRemNetCap);
+        amt = Math.round(amt * 1e8) / 1e8;
+
+        if (amt > 0) {
+          generated.push({
+            type: "perf_daily",
+            typeName: "Performance Daily Salary",
+            fromUser: "Contract",
+            amount: amt,
+            level: "-",
+            timestamp: evt.timestamp,
+            status: "Completed",
+            txHash: `0x_gen_perf_daily_${evt.startTime}_${evt.day}`,
+            blockNumber: 0,
+            tierIndex: evt.tierIndex
+          });
+          accumulatedPerf += amt;
+          cumulativeTotalEarned += amt;
+        }
+        continue;
+      }
+    }
+
+    // 6. Handle Target Fallbacks - Cap-Safe Unbundled ROI payouts
+    if (targetDailyROI > 0 && accumulatedDailyROI < targetDailyROI - 0.0001) {
+      const remDailyTotal = Math.round((targetDailyROI - accumulatedDailyROI) * 1e8) / 1e8;
+      let currRem = remDailyTotal;
+      let stepDay = 1;
+      const baseDailyAmt = currentDeposit > 0 ? (currentDeposit * 50) / 10000 : 15.25;
+      while (currRem > 0.0001 && stepDay <= 500) {
+        const itemAmt = Math.min(baseDailyAmt, currRem);
+        const lastTime = generated.length > 0 ? generated[generated.length - 1].timestamp : regTime;
+        const payoutTime = lastTime + (stepDay * ONE_DAY_SECS);
+
+        const maxRoiCap = currentDeposit * 2.2;
+        const maxNetworkCap = currentDeposit * 4.0;
+        const curRemRoiCap = Math.max(0, maxRoiCap - cumulativeTotalEarned);
+        const curRemNetCap = Math.max(0, maxNetworkCap - cumulativeTotalEarned);
+
+        const allowedAmt = Math.min(itemAmt, curRemRoiCap, curRemNetCap);
+        if (allowedAmt <= 0) break; // Strictly capped! Stop generating Daily ROI Payouts!
+
         generated.push({
-          type: "level_roi",
-          typeName: "Level ROI Matching",
-          fromUser: "Downline",
-          amount: diff,
-          level: "1",
-          timestamp: regTime + dayOffset * ONE_DAY_SECS,
+          type: "roi",
+          typeName: "Daily ROI Payout",
+          fromUser: "Contract",
+          amount: Math.round(allowedAmt * 1e8) / 1e8,
+          level: "-",
+          timestamp: payoutTime,
           status: "Completed",
-          txHash: `0x_gen_lvl_roi_fallback_${regTime}`,
+          txHash: `0x_gen_roi_unbundled_${regTime}_${stepDay}`,
           blockNumber: 0
         });
+        cumulativeTotalEarned += allowedAmt;
+        accumulatedDailyROI += allowedAmt;
+        currRem = Math.round((currRem - allowedAmt) * 1e8) / 1e8;
+        stepDay++;
+      }
+    }
+
+    if (targetBoosterROI > 0 && accumulatedBoosterROI < targetBoosterROI - 0.0001) {
+      const remBooster = Math.round((targetBoosterROI - accumulatedBoosterROI) * 1e8) / 1e8;
+      let currRem = remBooster;
+      let stepDay = 1;
+      const baseBoosterAmt = currentDeposit > 0 ? (currentDeposit * 50) / 10000 : 15.25;
+      while (currRem > 0.0001 && stepDay <= 500) {
+        const itemAmt = Math.min(baseBoosterAmt, currRem);
+        const lastTime = generated.length > 0 ? generated[generated.length - 1].timestamp : regTime;
+        const payoutTime = lastTime + (stepDay * ONE_DAY_SECS);
+
+        const maxRoiCap = currentDeposit * 2.2;
+        const maxNetworkCap = currentDeposit * 4.0;
+        const curRemRoiCap = Math.max(0, maxRoiCap - cumulativeTotalEarned);
+        const curRemNetCap = Math.max(0, maxNetworkCap - cumulativeTotalEarned);
+
+        const allowedAmt = Math.min(itemAmt, curRemRoiCap, curRemNetCap);
+        if (allowedAmt <= 0) break;
+
+        generated.push({
+          type: "booster_roi",
+          typeName: "Booster ROI Payout",
+          fromUser: "Contract",
+          amount: Math.round(allowedAmt * 1e8) / 1e8,
+          level: "-",
+          timestamp: payoutTime,
+          status: "Completed",
+          txHash: `0x_gen_booster_rem_${regTime}_${stepDay}`,
+          blockNumber: 0
+        });
+        cumulativeTotalEarned += allowedAmt;
+        accumulatedBoosterROI += allowedAmt;
+        currRem = Math.round((currRem - allowedAmt) * 1e8) / 1e8;
+        stepDay++;
+      }
+    }
+
+    if (targetPerf > 0 && accumulatedPerf < targetPerf - 0.001) {
+      const remPerf = Math.round((targetPerf - accumulatedPerf) * 1e8) / 1e8;
+      let currRem = remPerf;
+      let stepDay = 1;
+      const basePerfAmt = 150;
+      while (currRem > 0.0001 && stepDay <= 500) {
+        const itemAmt = Math.min(basePerfAmt, currRem);
+        const lastTime = generated.length > 0 ? generated[generated.length - 1].timestamp : regTime;
+        const payoutTime = lastTime + (stepDay * PERF_ONE_DAY_SECS);
+
+        const maxNetworkCap = currentDeposit * 4.0;
+        const curRemNetCap = Math.max(0, maxNetworkCap - cumulativeTotalEarned);
+
+        const allowedAmt = Math.min(itemAmt, curRemNetCap);
+        if (allowedAmt <= 0) break;
+
+        generated.push({
+          type: "perf_daily",
+          typeName: "Performance Daily Salary",
+          fromUser: "Contract",
+          amount: Math.round(allowedAmt * 1e8) / 1e8,
+          level: "-",
+          timestamp: payoutTime,
+          status: "Completed",
+          txHash: `0x_gen_perf_rem_${regTime}_${stepDay}`,
+          blockNumber: 0
+        });
+        cumulativeTotalEarned += allowedAmt;
+        accumulatedPerf += allowedAmt;
+        currRem = Math.round((currRem - allowedAmt) * 1e8) / 1e8;
+        stepDay++;
       }
     }
 
@@ -1275,7 +1590,8 @@ export default function Dashboard() {
           Number(currentOneDayVal),
           Number(currentPerfOneDayVal),
           mergedTreeNodes,
-          bonusesMapped
+          bonusesMapped,
+          deposits
         ).map(evt => ({ ...evt, isSimulated: true }));
 
         setOnChainEvents([...deposits, ...withdrawals, ...simulatedEvents]);
@@ -2211,94 +2527,44 @@ export default function Dashboard() {
 
     const ledger = dbLedger || [];
     
-    // Extract real non-simulated events, deposits, and withdrawals from the Convex DB ledger
-    // EXCLUDE roi, booster_roi, and perf events because we ALWAYS want to use the simulated daily breakdown for these!
+    // Real deposits and withdrawals from DB or contract state
+    const realDeposits = ledger.filter(e => e.type === "deposit");
+    const realWithdrawals = ledger.filter(e => e.type === "withdraw");
+
+    // All simulated events generated by our unified state machine simulator in onChainEvents
+    const simulatedEvents = onChainEvents.filter(e => e.isSimulated);
+
+    // Real on-chain events (if any)
     const realEvents = ledger.filter(e => 
       e.type !== "deposit" && 
       e.type !== "withdraw" && 
-      !e.isSimulated &&
-      e.type !== "roi" &&
-      e.type !== "booster_roi" &&
-      !["perf_instant", "perf_daily", "perf_claim"].includes(e.type)
-    );
-    const deposits = ledger.filter(e => e.type === "deposit");
-    const withdrawals = ledger.filter(e => e.type === "withdraw");
-
-    // Check which categories have real records in the database (Not needed anymore for these 3)
-    // const hasRealROI = realEvents.some(e => e.type === "roi");
-    // const hasRealBooster = realEvents.some(e => e.type === "booster_roi");
-    // const hasRealPerf = realEvents.some(e => ["perf_instant", "perf_daily", "perf_claim"].includes(e.type));
-
-    // Check which specific downline addresses have real level income events in the database
-    const realLevelIncomeFromUsers = new Set(
-      realEvents
-        .filter(e => e.type === "level_income")
-        .map(e => e.fromUser.toLowerCase())
+      !e.isSimulated
     );
 
-    // Check which specific downline addresses have real level ROI events in the database
-    const realLevelROIFromUsers = new Set(
-      realEvents
-        .filter(e => e.type === "level_roi")
-        .map(e => e.fromUser.toLowerCase())
-    );
+    // Combine simulated events with real deposits/withdrawals
+    const baseTxs = simulatedEvents.length > 0
+      ? [...realDeposits, ...realWithdrawals, ...simulatedEvents]
+      : [...realEvents, ...realDeposits, ...realWithdrawals];
 
-    // Calculate how much real level income and level ROI we have
-    const realLevelIncomeSum = realEvents.filter(e => e.type === "level_income").reduce((acc, e) => acc + (e.amount || 0), 0);
-    const realLevelROISum = realEvents.filter(e => e.type === "level_roi").reduce((acc, e) => acc + (e.amount || 0), 0);
-
-    const targetLevelIncome = parseFloat(userData?.levelIncomeEarned || "0");
-    const targetLevelROI = parseFloat(userData?.levelROIEarned || "0");
-
-    let allowedSimulatedLevelIncome = Math.max(0, targetLevelIncome - realLevelIncomeSum);
-    let allowedSimulatedLevelROI = Math.max(0, targetLevelROI - realLevelROISum);
-
-    // Filter local simulated events to only include categories that don't have real records in DB
-    const simulatedEvents = [];
-    
-    for (const e of onChainEvents) {
-      if (!e.isSimulated) continue;
-      
-      // We ALWAYS want to keep simulated ROI and Perf events to show the daily breakdown
-      // instead of the lumped sum from the real contract events.
-
-      if (e.type === "level_income") {
-        if (realLevelIncomeFromUsers.has(e.fromUser.toLowerCase())) continue;
-        if (allowedSimulatedLevelIncome <= 0.01) continue;
-        
-        let amt = e.amount;
-        if (amt > allowedSimulatedLevelIncome) amt = allowedSimulatedLevelIncome;
-        
-        simulatedEvents.push({ ...e, amount: amt });
-        allowedSimulatedLevelIncome -= amt;
-        continue;
-      }
-
-      if (e.type === "level_roi") {
-        if (realLevelROIFromUsers.has(e.fromUser.toLowerCase())) continue;
-        if (allowedSimulatedLevelROI <= 0.01) continue;
-        
-        let amt = e.amount;
-        if (amt > allowedSimulatedLevelROI) amt = allowedSimulatedLevelROI;
-        
-        simulatedEvents.push({ ...e, amount: amt });
-        allowedSimulatedLevelROI -= amt;
-        continue;
-      }
-
-      simulatedEvents.push(e);
-    }
-
-    const baseTxs = [...realEvents, ...deposits, ...withdrawals, ...simulatedEvents];
-
-    // Sort descending for final table list display
+    // Sort descending for final table list display with deterministic tie-breaking
     baseTxs.sort((a, b) => {
       if (a.timestamp !== b.timestamp) {
         return b.timestamp - a.timestamp;
       }
-      if (a.type === "deposit" && b.type !== "deposit") return 1;
-      if (a.type !== "deposit" && b.type === "deposit") return -1;
-      return 0;
+      const priorityMap = {
+        perf_daily: 4,
+        perf_instant: 4,
+        perf_claim: 4,
+        roi: 3,
+        booster_roi: 3,
+        level_income: 2,
+        level_roi: 2,
+        withdraw: 1,
+        deposit: 0
+      };
+      const prioA = priorityMap[a.type] !== undefined ? priorityMap[a.type] : 2;
+      const prioB = priorityMap[b.type] !== undefined ? priorityMap[b.type] : 2;
+      return prioB - prioA;
     });
 
     return baseTxs;
@@ -3019,7 +3285,7 @@ export default function Dashboard() {
 
         {/* 1. DASHBOARD VIEW */}
         <div className={`view ${activeView === "dashboard" ? "active" : ""}`}>
-          {pendingQualifications.length > 0 && roiCapPercent < 100 && networkCapPercent < 100 && (
+          {pendingQualifications.length > 0 && networkCapPercent < 100 && (
             <div className="card" style={{
               background: "rgba(94, 200, 242, 0.06)",
               border: "2px dashed var(--blue-bright)",
@@ -3201,7 +3467,7 @@ export default function Dashboard() {
               <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "10px" }}>
                 <span style={{ fontWeight: "600", fontSize: "14px" }}>Network Limit Cap (400% Max)</span>
                 <span className="mono" style={{ fontSize: "14px", color: "var(--blue-bright)" }}>
-                  {currentNetworkEarned.toFixed(2)} / {maxNetworkCap.toFixed(2)} USDT
+                  {Math.min(currentNetworkEarned, maxNetworkCap).toFixed(2)} / {maxNetworkCap.toFixed(2)} USDT
                 </span>
               </div>
               <div className="progress-bg" style={{ background: "var(--surface-2)", height: "10px", borderRadius: "5px", overflow: "hidden", border: "1px solid var(--border)", position: "relative" }}>
@@ -3404,7 +3670,7 @@ export default function Dashboard() {
                         {nonZeroTxs.map((tx, idx) => (
                           <tr key={idx}>
                             <td><span className={tx.tagClass}>{tx.typeName}</span></td>
-                            <td style={{ textAlign: "right" }} className="amt-pos">{tx.amount}</td>
+                            <td style={{ textAlign: "right" }} className="amt-pos">+{formatTxAmount(tx.amount)} USDT</td>
                           </tr>
                         ))}
                       </tbody>
@@ -3719,7 +3985,7 @@ export default function Dashboard() {
                             ) : tx.fromUser}
                           </td>
                           <td style={{ padding: "12px 10px", fontSize: "13px", textAlign: "right", fontWeight: "600" }} className={isNegative ? "amt-neg" : "amt-pos"}>
-                            {isNegative ? "-" : "+"}{tx.amount} USDT
+                            {isNegative ? "-" : "+"}{formatTxAmount(tx.amount)} USDT
                           </td>
                           <td style={{ padding: "12px 10px", fontSize: "13px", textAlign: "center" }} className="mono">{tx.level}</td>
                           <td style={{ padding: "12px 10px", fontSize: "13px" }} className="mono">{dateStr}</td>
