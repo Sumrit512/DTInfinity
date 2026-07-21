@@ -6,7 +6,7 @@ import { useQuery, useMutation, useAction } from "convex/react";
 import { api } from "../../convex/_generated/api.js";
 
 // Default contract addresses (placeholders that user can update in settings)
-const DEFAULT_DT_INFINITY_ADDRESS = "0xe440075f60e727728f398f3245ad1893f3aa6af2";
+const DEFAULT_DT_INFINITY_ADDRESS = "0xf0533aaca7ebe1ff267c8799e691f0309b42f729";
 const DEFAULT_USDT_ADDRESS = "0x0aB8c2DfE9aD2e2D3f58E6006884cda5e6f1E7B9";
 
 // Simple USDT ABI
@@ -357,14 +357,7 @@ export default function Dashboard() {
     if (typeof window !== "undefined") {
       setOrigin(window.location.origin);
       let savedDT = localStorage.getItem("DT_INFINITY_ADDRESS");
-      if (savedDT && (
-        savedDT.toLowerCase() === "0xa374e919738dc198213a497937f396d275e348f7" ||
-        savedDT.toLowerCase() === "0x4ee2e6e9306bd8f5b6e111062aae9c259f7b4df3" ||
-        savedDT.toLowerCase() === "0xa2306ed14dc4e1f0c876260621e7dba5a7797eff" ||
-        savedDT.toLowerCase() === "0x32116f10442966206c64279105c6d783743fb186" ||
-        savedDT.toLowerCase() === "0xe1c223d8a3d694e67a1a0514010b11722f41cb00" ||
-        savedDT.toLowerCase() === "0xbbc08a606b04a837ace3007c0f0166e334ad4c5d"
-      )) {
+      if (savedDT && savedDT.toLowerCase() !== "0xf0533aaca7ebe1ff267c8799e691f0309b42f729") {
         localStorage.removeItem("DT_INFINITY_ADDRESS");
         savedDT = null;
       }
@@ -3015,7 +3008,7 @@ export default function Dashboard() {
 
         {/* 1. DASHBOARD VIEW */}
         <div className={`view ${activeView === "dashboard" ? "active" : ""}`}>
-          {pendingQualifications.length > 0 && networkCapPercent < 100 && (
+          {pendingQualifications.length > 0 && roiCapPercent < 100 && networkCapPercent < 100 && (
             <div className="card" style={{
               background: "rgba(94, 200, 242, 0.06)",
               border: "2px dashed var(--blue-bright)",
@@ -3265,6 +3258,8 @@ export default function Dashboard() {
           </div>
 
           {(() => {
+            const isCapped = roiCapPercent >= 100 || (maxRoiCap > 0 && currentRoiEarned >= maxRoiCap);
+            if (isCapped) return null;
             const activeStreams = activeBonuses.filter(bonus => {
               const nowUnix = Math.floor(Date.now() / 1000);
               return (Number(bonus.endTime) - nowUnix) > 0;
