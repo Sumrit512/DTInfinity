@@ -755,14 +755,19 @@ export default function Dashboard() {
 
           if (depsToUse && depsToUse.length > 0) {
             depsToUse.forEach((dep, dIdx) => {
-              let level = 1;
+              let level = 0;
               let current = node;
-              while (current && current.sponsor && current.sponsor.toLowerCase() !== addr.toLowerCase() && level < 20) {
-                current = treeNodes[current.sponsor.toLowerCase()];
+              let foundLevel = 0;
+              while (current && current.sponsor && current.sponsor !== "0x0000000000000000000000000000000000000000" && level < 20) {
                 level++;
+                if (current.sponsor.toLowerCase() === addr.toLowerCase()) {
+                  foundLevel = level;
+                  break;
+                }
+                current = treeNodes[current.sponsor.toLowerCase()];
               }
-              if (level <= 5) {
-                const levelPct = [0.05, 0.02, 0.01, 0.01, 0.01][level - 1] || 0;
+              if (foundLevel > 0 && foundLevel <= 5) {
+                const levelPct = [0.05, 0.02, 0.01, 0.01, 0.01][foundLevel - 1] || 0;
                 const depAmt = typeof dep.amount === "number" ? dep.amount : parseFloat(dep.amount || 0);
                 const depTime = Number(dep.timestamp || node.registrationTime || regTime);
                 const totalAmt = depAmt * levelPct;
@@ -778,7 +783,7 @@ export default function Dashboard() {
                       typeName: "Level Income",
                       fromUser: childAddr,
                       amount: Math.round(partAmt * 1e8) / 1e8,
-                      level: level.toString(),
+                      level: foundLevel.toString(),
                       timestamp: offsetTime,
                       sortPriority: 2,
                       txHash: `0x_gen_lvl_inc_${childAddr.toLowerCase()}_${dIdx}_${offsetTime}_${partIdx}`
@@ -888,15 +893,22 @@ export default function Dashboard() {
         const node = treeNodes[childAddr];
         const tDep = parseFloat(node.totalDeposits) || 0;
         if (tDep > 0) {
-          let level = 1;
+          let level = 0;
           let current = node;
-          while (current && current.sponsor && current.sponsor.toLowerCase() !== addr.toLowerCase() && level < 20) {
-            current = treeNodes[current.sponsor.toLowerCase()];
+          let foundLevel = 0;
+          while (current && current.sponsor && current.sponsor !== "0x0000000000000000000000000000000000000000" && level < 20) {
             level++;
+            if (current.sponsor.toLowerCase() === addr.toLowerCase()) {
+              foundLevel = level;
+              break;
+            }
+            current = treeNodes[current.sponsor.toLowerCase()];
           }
-          const expectedDaily = tDep * 0.005 * (levelROIPct[level - 1] || 0);
-          if (expectedDaily > 0) {
-            downlineContributions.push({ addr: childAddr, level, expectedDaily, childRegTime: Number(node.registrationTime || regTime) });
+          if (foundLevel > 0 && foundLevel <= 20) {
+            const expectedDaily = tDep * 0.005 * (levelROIPct[foundLevel - 1] || 0);
+            if (expectedDaily > 0) {
+              downlineContributions.push({ addr: childAddr, level: foundLevel, expectedDaily, childRegTime: Number(node.registrationTime || regTime) });
+            }
           }
         }
       });
