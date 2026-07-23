@@ -1183,6 +1183,22 @@ export default function Dashboard() {
       if (!isDup) list.push(b);
     });
 
+    // Identify performance tiers that have already been claimed via Instant Payment Option (perf_instant)
+    const instantClaimedTiers = new Set();
+    (dbLedger || []).forEach(e => {
+      if (e.type === "perf_instant") {
+        if (e.tierIndex !== undefined) {
+          instantClaimedTiers.add(e.tierIndex);
+        } else {
+          PERFORMANCE_TIERS.forEach((t, idx) => {
+            if (Math.abs((parseFloat(e.amount) || 0) - t.instant) < 0.01) {
+              instantClaimedTiers.add(idx);
+            }
+          });
+        }
+      }
+    });
+
     const nowUnix = Math.floor(Date.now() / 1000);
     const userDepNum = parseFloat(userData.totalDeposits || "0");
     const regTimeNum = Number(userData.registrationTime || 0);
@@ -1192,18 +1208,20 @@ export default function Dashboard() {
       const endClaimTime = claimTimeNum + Number(perfOneDay || 60n);
       const isExpired = nowUnix >= endClaimTime;
       if (isExpired && !qual.isCappedAtStart && userDepNum >= 50) {
-        const exists = list.some(b => 
-          (b.tierIndex !== undefined && b.tierIndex === qual.tierIndex) ||
-          Math.abs(b.startTime - claimTimeNum) < 300
-        );
-        if (!exists) {
-          list.push({
-            tierIndex: qual.tierIndex,
-            dailyRate: PERFORMANCE_TIERS[qual.tierIndex].daily,
-            startTime: claimTimeNum,
-            endTime: claimTimeNum + 30 * Number(perfOneDay || 60n),
-            lastClaimTime: claimTimeNum
-          });
+        if (!instantClaimedTiers.has(qual.tierIndex)) {
+          const exists = list.some(b => 
+            (b.tierIndex !== undefined && b.tierIndex === qual.tierIndex) ||
+            Math.abs(b.startTime - claimTimeNum) < 300
+          );
+          if (!exists) {
+            list.push({
+              tierIndex: qual.tierIndex,
+              dailyRate: PERFORMANCE_TIERS[qual.tierIndex].daily,
+              startTime: claimTimeNum,
+              endTime: claimTimeNum + 30 * Number(perfOneDay || 60n),
+              lastClaimTime: claimTimeNum
+            });
+          }
         }
       }
     });
@@ -1249,28 +1267,30 @@ export default function Dashboard() {
 
     if (userDepNum >= 50 && regTimeNum > 0) {
       PERFORMANCE_TIERS.forEach((tier, tIdx) => {
-        if (strongLeg >= tier.target && otherLegs >= tier.target) {
-          const exists = list.some(b => 
-            (b.tierIndex !== undefined && b.tierIndex === tIdx)
-          );
-          if (!exists) {
-            const qualClaimTime = (pendingQualifications && pendingQualifications.length > 0 && Number(pendingQualifications[0].claimTime) > 0) 
-              ? Number(pendingQualifications[0].claimTime) 
-              : 1784773800;
-            list.push({
-              tierIndex: tIdx,
-              dailyRate: tier.daily,
-              startTime: qualClaimTime,
-              endTime: qualClaimTime + 30 * Number(perfOneDay || 60n),
-              lastClaimTime: qualClaimTime
-            });
+        if (!instantClaimedTiers.has(tIdx)) {
+          if (strongLeg >= tier.target && otherLegs >= tier.target) {
+            const exists = list.some(b => 
+              (b.tierIndex !== undefined && b.tierIndex === tIdx)
+            );
+            if (!exists) {
+              const qualClaimTime = (pendingQualifications && pendingQualifications.length > 0 && Number(pendingQualifications[0].claimTime) > 0) 
+                ? Number(pendingQualifications[0].claimTime) 
+                : 1784773800;
+              list.push({
+                tierIndex: tIdx,
+                dailyRate: tier.daily,
+                startTime: qualClaimTime,
+                endTime: qualClaimTime + 30 * Number(perfOneDay || 60n),
+                lastClaimTime: qualClaimTime
+              });
+            }
           }
         }
       });
     }
 
     return list;
-  }, [activeBonuses, pendingQualifications, perfOneDay, userData.totalDeposits, userData.registrationTime, userData.totalTeamVolume, lifetimeTeamVolume, secondsSinceSync]);
+  }, [activeBonuses, pendingQualifications, perfOneDay, userData.totalDeposits, userData.registrationTime, userData.totalTeamVolume, lifetimeTeamVolume, secondsSinceSync, dbLedger]);
 
   const unmergedTxs = useMemo(() => {
     if (!walletConnected || !isRegistered) return [];
@@ -1370,13 +1390,19 @@ export default function Dashboard() {
     let levelIncome = 0;
     let levelROI = 0;
     let performance = 0;
+    let perfDailyInContract = 0;
 
     unmergedTxs.forEach(tx => {
       if (tx.type === "roi") dailyROI += tx.amount;
       else if (tx.type === "booster_roi") boosterROI += tx.amount;
       else if (tx.type === "level_income") levelIncome += tx.amount;
       else if (tx.type === "level_roi") levelROI += tx.amount;
-      else if (["perf_instant", "perf_daily", "perf_claim"].includes(tx.type)) performance += tx.amount;
+      else if (["perf_instant", "perf_daily", "perf_claim"].includes(tx.type)) {
+        performance += tx.amount;
+        if (tx.type !== "perf_instant") {
+          perfDailyInContract += tx.amount;
+        }
+      }
     });
 
     if (dailyROI === 0 && parseFloat(userData.dailyROIEarned || "0") > 0 && (!walletConnected || !isRegistered)) {
@@ -1397,8 +1423,8 @@ export default function Dashboard() {
 
     const totalEarned = Math.min(dailyROI + boosterROI + levelIncome + levelROI + performance, maxNetworkCap);
     const totalWithdrawnNum = parseFloat(userData.totalWithdrawn || "0");
-    // Level Income is paid instantly to wallet on deposit, so only contract-accumulated yields (ROI, Level ROI, Perf) remain claimable
-    const claimableInContract = Math.max(0, Math.min(dailyROI + boosterROI + levelROI + performance, maxNetworkCap) - totalWithdrawnNum);
+    // Level Income & Instant Performance Bonus are transferred directly to wallet on deposit/claim, so only contract-accumulated yields (ROI, Level ROI, Perf Daily stream) remain claimable in contract
+    const claimableInContract = Math.max(0, Math.min(dailyROI + boosterROI + levelROI + perfDailyInContract, maxNetworkCap) - totalWithdrawnNum);
 
     return {
       dailyROI: dailyROI.toFixed(2),
