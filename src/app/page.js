@@ -535,58 +535,17 @@ export default function Dashboard() {
           const isCappedAtStart = await dtContract.pendingTierCappedAtStart(addr, t);
           if (isCappedAtStart) continue; // Skip ineligible capped qualification
 
-          // Verify user meets leg volume targets (strongLeg >= target && otherLegs >= target)
-          let calculatedStrongLeg = 0;
-          let calculatedTotalVol = 0;
-          if (addr && dbTreeNodes) {
-            const rootLower = addr.toLowerCase();
-            const directAddrs = (dbTreeNodes[rootLower]?.children) || [];
-            const legVolumes = [];
-
-            directAddrs.forEach(childAddr => {
-              let legSum = 0;
-              const queue = [childAddr.toLowerCase()];
-              const visited = new Set(queue);
-              while (queue.length > 0) {
-                const current = queue.shift();
-                const node = dbTreeNodes[current];
-                if (node) {
-                  legSum += parseFloat(node.totalDeposits || 0);
-                  (node.children || []).forEach(subChild => {
-                    const subLower = subChild.toLowerCase();
-                    if (!visited.has(subLower)) {
-                      visited.add(subLower);
-                      queue.push(subLower);
-                    }
-                  });
-                }
-              }
-              legVolumes.push(legSum);
-            });
-
-            if (legVolumes.length > 0) {
-              calculatedStrongLeg = Math.max(...legVolumes);
-              calculatedTotalVol = legVolumes.reduce((a, b) => a + b, 0);
-            }
-          }
-
-          const strongLeg = Math.max(parseFloat(userData.strongestLegVolume || "0"), calculatedStrongLeg);
-          const totalVol = Math.max(parseFloat(userData.totalTeamVolume || "0"), calculatedTotalVol, lifetimeTeamVolume || 0);
-          const otherLegs = Math.max(0, totalVol - strongLeg);
-
-          const target = PERFORMANCE_TIERS[t].target;
-          if (strongLeg < target || otherLegs < target) continue; // Skip ineligible user without leg volume
-
           const claimTime = await dtContract.qualificationMonth(addr, t);
-          const endClaimTime = Number(claimTime) + Number(currentPerfOneDayVal);
-          const isClaimWindowActive = nowUnix >= Number(claimTime) && nowUnix < endClaimTime;
+          const claimTimeNum = Number(claimTime);
+          const endClaimTime = claimTimeNum + Number(currentPerfOneDayVal);
+          const isClaimWindowActive = nowUnix >= claimTimeNum && nowUnix < endClaimTime;
           qualifications.push({
             tierIndex: t,
             target: PERFORMANCE_TIERS[t].target,
             instant: PERFORMANCE_TIERS[t].instant,
             daily: PERFORMANCE_TIERS[t].daily,
             isPending,
-            claimTime: Number(claimTime),
+            claimTime: claimTimeNum,
             isClaimWindowActive,
             isCappedAtStart
           });
@@ -785,13 +744,6 @@ export default function Dashboard() {
             if (isPending) {
               const isCappedAtStart = await dtContract.pendingTierCappedAtStart(addr, t);
               if (isCappedAtStart) continue; // Skip ineligible capped qualification
-
-              // Verify user meets leg volume targets (strongLeg >= target && otherLegs >= target)
-              const strongLeg = parseFloat(ethers.formatUnits(networkInfo.strongestLegVolume || 0n, 18));
-              const totalVol = parseFloat(ethers.formatUnits(networkInfo.totalTeamVolume || 0n, 18));
-              const otherLegs = Math.max(0, totalVol - strongLeg);
-              const target = PERFORMANCE_TIERS[t].target;
-              if (strongLeg < target || otherLegs < target) continue; // Skip ineligible user without leg volume
 
               const claimTime = await dtContract.qualificationMonth(addr, t);
               const claimTimeNum = Number(claimTime);
