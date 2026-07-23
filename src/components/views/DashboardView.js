@@ -34,9 +34,11 @@ export default function DashboardView({
     return () => clearInterval(interval);
   }, []);
 
+  const validQualifications = (pendingQualifications || []).filter(qual => !qual.isCappedAtStart);
+
   return (
     <div className="view active">
-      {pendingQualifications.length > 0 && (
+      {validQualifications.length > 0 && (
         <div className="card" style={{
           background: "rgba(94, 200, 242, 0.06)",
           border: "2px dashed var(--blue-bright)",
@@ -64,7 +66,7 @@ export default function DashboardView({
           </div>
 
           <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-            {pendingQualifications.map((qual) => {
+            {validQualifications.map((qual) => {
               const claimDateStr = new Date(qual.claimTime * 1000).toLocaleString(undefined, {
                 month: 'short',
                 day: 'numeric',
