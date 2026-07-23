@@ -13,13 +13,11 @@ const TOPICS = {
 };
 
 const BSC_TESTNET_RPCS = [
-  process.env.ANKR_API_KEY ? `https://rpc.ankr.com/bsc_testnet_chapel/${process.env.ANKR_API_KEY}` : "https://rpc.ankr.com/bsc_testnet_chapel",
-  "https://bsc-testnet.public.blastapi.io",
-  "https://data-seed-prebsc-1-s1.binance.org:8545",
-  "https://data-seed-prebsc-2-s1.binance.org:8545",
-  "https://data-seed-prebsc-1-s2.binance.org:8545",
-  "https://data-seed-prebsc-2-s2.binance.org:8545",
-  "https://data-seed-prebsc-1-s3.binance.org:8545",
+  "https://data-seed-prebsc-1-s1.bnbchain.org:8545",
+  "https://data-seed-prebsc-2-s1.bnbchain.org:8545",
+  "https://data-seed-prebsc-1-s2.bnbchain.org:8545",
+  "https://data-seed-prebsc-2-s2.bnbchain.org:8545",
+  "https://bsc-testnet-rpc.publicnode.com",
 ];
 
 async function rpcRequest(rpcUrl, method, params) {
@@ -64,20 +62,36 @@ function decodeAddress(hex) {
 }
 
 async function getLogs(contractAddress, fromBlock, toBlock, userTopic) {
-  const CHUNK = 2000; // safe chunk size to respect public RPC block range constraints
+  const combinedTopics = [
+    TOPICS.LevelIncomePaid,
+    TOPICS.LevelROIPaid,
+    TOPICS.PerformanceBonusClaimed,
+    TOPICS.PerformanceDailyPaid,
+    TOPICS.ROIAccumulated,
+    TOPICS.BoosterROIAccumulated
+  ];
+
+  // Restrict search range to at most 5000 blocks to prevent hitting RPC query limits
+  const MAX_BLOCK_RANGE = 5000;
+  const start = Math.max(fromBlock, toBlock - MAX_BLOCK_RANGE);
+  const CHUNK = 1000; // Small safe chunk size
   const logs = [];
-  for (let b = fromBlock; b <= toBlock; b += CHUNK) {
+
+  for (let b = start; b <= toBlock; b += CHUNK) {
     const end = Math.min(b + CHUNK - 1, toBlock);
     const params = [{
       address: contractAddress.toLowerCase(),
       fromBlock: "0x" + b.toString(16),
       toBlock: "0x" + end.toString(16),
-      topics: [null, userTopic] // Filter by userTopic on RPC server!
+      topics: [combinedTopics, userTopic] // Strictly pull contract events for userTopic
     }];
-    const result = await rpcRequestWithFallback("eth_getLogs", params);
-    if (Array.isArray(result)) logs.push(...result);
-    // Small delay between chunks to avoid rate limits
-    if (end < toBlock) await new Promise(r => setTimeout(r, 100));
+    try {
+      const result = await rpcRequestWithFallback("eth_getLogs", params);
+      if (Array.isArray(result)) logs.push(...result);
+    } catch (err) {
+      console.warn(`getLogs RPC chunk [${b}-${end}] error:`, err.message);
+    }
+    if (end < toBlock) await new Promise(r => setTimeout(r, 50));
   }
   return logs;
 }
@@ -99,16 +113,17 @@ export const fetchAndSyncLogs = action({
     const userTopic = addrToTopic(user);
     const { fromBlock, toBlock } = args;
     const perfTiers = args.perfTiers || [
-      { instant: 75, daily: 2.5 },
-      { instant: 150, daily: 5 },
-      { instant: 300, daily: 10 },
-      { instant: 600, daily: 20 },
-      { instant: 1500, daily: 50 },
+      { instant: 75, daily: 5 },
+      { instant: 150, daily: 10 },
+      { instant: 375, daily: 25 },
+      { instant: 750, daily: 50 },
+      { instant: 2250, daily: 150 },
+      { instant: 7500, daily: 500 },
     ];
 
     let startBlock = fromBlock;
-    if (startBlock <= 0) {
-      startBlock = Math.max(0, toBlock - 150000);
+    if (startBlock <= 0 || (toBlock - startBlock) > 5000) {
+      startBlock = Math.max(0, toBlock - 5000);
     }
 
     const events = [];

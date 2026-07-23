@@ -29,6 +29,7 @@ export const upsertUser = mutation({
       startTime: v.number(),
       endTime: v.number(),
       lastClaimTime: v.number(),
+      isDefaultedExpired: v.optional(v.boolean()),
     }))),
   },
   handler: async (ctx, args) => {
@@ -206,6 +207,21 @@ export const dumpAllUsers = query({
     return await ctx.db.query("users").collect();
   }
 });
+
+export const dumpAllDeposits = query({
+  args: {},
+  handler: async (ctx) => {
+    return await ctx.db.query("deposits").collect();
+  }
+});
+
+export const dumpAllWithdrawals = query({
+  args: {},
+  handler: async (ctx) => {
+    return await ctx.db.query("withdrawals").collect();
+  }
+});
+
 
 export const checkTime = query({
   args: {},

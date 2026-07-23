@@ -19,45 +19,105 @@ export const syncOnChainEvents = mutation({
       isSimulated: v.boolean(),
       tierIndex: v.optional(v.number()),
       logIndex: v.optional(v.number()),
+      user: v.optional(v.string()),
     })),
   },
   handler: async (ctx, args) => {
     const contractLower = args.contractAddress.toLowerCase();
     const userLower = args.user.toLowerCase();
     
-    // Clear existing events for this user and contract ONLY if their blockNumber >= fromBlock
-    // This allows us to incrementally sync without wiping history!
+    // Fetch all existing events for this user and contract from Convex DB (Source of Truth)
     const allEventsInTable = await ctx.db.query("onChainEvents").collect();
-    const userEvents = allEventsInTable.filter(doc => doc.user.toLowerCase() === userLower);
+    const userEvents = allEventsInTable.filter(
+      doc => doc.user.toLowerCase() === userLower &&
+             doc.contractAddress &&
+             doc.contractAddress.toLowerCase() === contractLower
+    );
+    
+    const existingKeys = new Set();
     
     for (const doc of userEvents) {
-      // Always clear simulated/generated events when syncing to prevent duplicate reporting
       const isSimulatedOrGenerated = doc.isSimulated || 
+        !doc.blockNumber ||
         doc.blockNumber === 0 || 
-        doc.txHash.startsWith("0x_gen_") || 
-        doc.txHash.startsWith("0x_evt_") ||
-        !doc.contractAddress ||
-        doc.contractAddress.toLowerCase() !== contractLower;
+        !doc.txHash ||
+        doc.txHash.length !== 66 ||
+        doc.txHash.includes("_");
         
       if (isSimulatedOrGenerated) {
+        // Clean up temporary UI/simulated state items to keep stored state clean
         await ctx.db.delete(doc._id);
-      } 
-      // If a fromBlock is provided (real sync), clear real events from that block onwards
-      else if (args.fromBlock !== undefined && doc.blockNumber >= args.fromBlock) {
-        await ctx.db.delete(doc._id);
+      } else {
+        const txHashLower = doc.txHash.toLowerCase();
+        const fromUserLower = doc.fromUser.toLowerCase();
+        const key2 = `${txHashLower}|${doc.type}|${fromUserLower}|${doc.level}|${doc.amount}|${doc.timestamp}`;
+        
+        let isDuplicate = existingKeys.has(key2);
+        if (doc.logIndex !== undefined && doc.logIndex !== null) {
+          const key1 = `${txHashLower}|${doc.logIndex}`;
+          if (existingKeys.has(key1)) {
+            isDuplicate = true;
+          }
+        }
+        
+        if (isDuplicate) {
+          // Clean up existing duplicates in the database automatically
+          await ctx.db.delete(doc._id);
+        } else {
+          existingKeys.add(key2);
+          if (doc.logIndex !== undefined && doc.logIndex !== null) {
+            existingKeys.add(`${txHashLower}|${doc.logIndex}`);
+          }
+        }
       }
     }
 
-    // Insert the current active list of events
+    // Filter incoming blockchain events to isolate only missing data not yet in Convex
+    const missingEvents = [];
     for (const event of args.events) {
+      if (event.isSimulated) continue; // Skip simulated items in database persistence
+      
       const txHashLower = event.txHash.toLowerCase();
-      await ctx.db.insert("onChainEvents", {
-        ...event,
-        contractAddress: contractLower,
-        user: userLower,
-        txHash: txHashLower,
-        fromUser: event.fromUser.toLowerCase(),
-      });
+      const fromUserLower = event.fromUser.toLowerCase();
+      const key2 = `${txHashLower}|${event.type}|${fromUserLower}|${event.level}|${event.amount}|${event.timestamp}`;
+      
+      let isDuplicate = existingKeys.has(key2);
+      if (event.logIndex !== undefined && event.logIndex !== null) {
+        const key1 = `${txHashLower}|${event.logIndex}`;
+        if (existingKeys.has(key1)) {
+          isDuplicate = true;
+        }
+      }
+
+      if (!isDuplicate) {
+        existingKeys.add(key2);
+        if (event.logIndex !== undefined && event.logIndex !== null) {
+          existingKeys.add(`${txHashLower}|${event.logIndex}`);
+        }
+        missingEvents.push({
+          ...event,
+          contractAddress: contractLower,
+          user: userLower,
+          txHash: txHashLower,
+          fromUser: fromUserLower,
+        });
+      }
+    }
+
+    // Sort missing events in strict ascending chronological order before inserting into database
+    missingEvents.sort((a, b) => {
+      if (a.timestamp !== b.timestamp) {
+        return a.timestamp - b.timestamp;
+      }
+      if (a.blockNumber !== b.blockNumber) {
+        return a.blockNumber - b.blockNumber;
+      }
+      return (a.logIndex || 0) - (b.logIndex || 0);
+    });
+
+    // Append missing chronological events to Convex DB
+    for (const event of missingEvents) {
+      await ctx.db.insert("onChainEvents", event);
     }
   },
 });
@@ -84,31 +144,47 @@ export const getLedger = query({
     const contractLower = args.contractAddress.toLowerCase();
     const addr = args.address.toLowerCase();
 
-    // 1. Fetch on-chain events stored in DB
-    const dbEvents = await ctx.db
-      .query("onChainEvents")
-      .withIndex("by_contract_address_user_time", (q) =>
-        q.eq("contractAddress", contractLower).eq("user", addr)
-      )
-      .collect();
+    // 1. Fetch on-chain events stored in DB for this user
+    const allEventsInTable = await ctx.db.query("onChainEvents").collect();
+    let dbEvents = allEventsInTable.filter(e => e.user && e.user.toLowerCase() === addr);
+    if (contractLower && contractLower !== "0x0000000000000000000000000000000000000000") {
+      const matchContract = dbEvents.filter(e => e.contractAddress && e.contractAddress.toLowerCase() === contractLower);
+      if (matchContract.length > 0) {
+        dbEvents = matchContract;
+      }
+    }
+
+    // Filter out synthetic candidate or legacy simulated events
+    const realDbEvents = dbEvents.filter(e =>
+      !e.isSimulated &&
+      e.blockNumber &&
+      e.blockNumber > 0 &&
+      e.txHash &&
+      e.txHash.length === 66 &&
+      !e.txHash.includes("_")
+    );
 
     // 2. Fetch deposits stored in DB
-    const dbDeposits = await ctx.db
-      .query("deposits")
-      .withIndex("by_contract_address_user", (q) =>
-        q.eq("contractAddress", contractLower).eq("user", addr)
-      )
-      .collect();
+    const allDepositsTable = await ctx.db.query("deposits").collect();
+    let dbDeposits = allDepositsTable.filter(d => d.user && d.user.toLowerCase() === addr);
+    if (contractLower && contractLower !== "0x0000000000000000000000000000000000000000") {
+      const matchDep = dbDeposits.filter(d => d.contractAddress && d.contractAddress.toLowerCase() === contractLower);
+      if (matchDep.length > 0) {
+        dbDeposits = matchDep;
+      }
+    }
 
     // 3. Fetch withdrawals stored in DB
-    const dbWithdrawals = await ctx.db
-      .query("withdrawals")
-      .withIndex("by_contract_address_user", (q) =>
-        q.eq("contractAddress", contractLower).eq("user", addr)
-      )
-      .collect();
+    const allWithdrawalsTable = await ctx.db.query("withdrawals").collect();
+    let dbWithdrawals = allWithdrawalsTable.filter(w => w.user && w.user.toLowerCase() === addr);
+    if (contractLower && contractLower !== "0x0000000000000000000000000000000000000000") {
+      const matchWith = dbWithdrawals.filter(w => w.contractAddress && w.contractAddress.toLowerCase() === contractLower);
+      if (matchWith.length > 0) {
+        dbWithdrawals = matchWith;
+      }
+    }
 
-    const formattedEvents = dbEvents.map(e => ({
+    const formattedEvents = realDbEvents.map(e => ({
       type: e.type,
       typeName: e.typeName,
       fromUser: e.fromUser,
@@ -170,8 +246,14 @@ export const getLedger = query({
       }
     }
 
-    // Sort by timestamp descending (latest first)
-    uniqueList.sort((a, b) => b.timestamp - a.timestamp);
+    // Sort by timestamp descending (latest first) with event type priority for equal timestamps
+    const priorityMap = { perf_daily: 4, perf_instant: 4, perf_claim: 4, roi: 3, booster_roi: 3, level_income: 2, level_roi: 2, withdraw: 1, deposit: 0 };
+    uniqueList.sort((a, b) => {
+      if (a.timestamp !== b.timestamp) return b.timestamp - a.timestamp;
+      const prioA = priorityMap[a.type] !== undefined ? priorityMap[a.type] : 2;
+      const prioB = priorityMap[b.type] !== undefined ? priorityMap[b.type] : 2;
+      return prioB - prioA;
+    });
 
     return uniqueList;
   }

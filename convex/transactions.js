@@ -16,26 +16,49 @@ export const syncDeposits = mutation({
   handler: async (ctx, args) => {
     const contractLower = args.contractAddress.toLowerCase();
     const userLower = args.user.toLowerCase();
+
+    // Query existing deposits for this user in Convex DB (Source of Truth)
+    const existingUserDeposits = await ctx.db
+      .query("deposits")
+      .withIndex("by_contract_address_user", (q) =>
+        q.eq("contractAddress", contractLower).eq("user", userLower)
+      )
+      .collect();
+
+    const missingDeposits = [];
+
     for (const dep of args.deposits) {
       const txHashLower = dep.txHash.toLowerCase();
-      const existing = await ctx.db
-        .query("deposits")
-        .withIndex("by_txHash", (q) => q.eq("txHash", txHashLower))
-        .unique();
+      const actualHashLower = dep.actualTxHash ? dep.actualTxHash.toLowerCase() : undefined;
+
+      // Check if deposit already exists in Convex DB
+      const existing = existingUserDeposits.find(e => 
+        e.txHash.toLowerCase() === txHashLower ||
+        (actualHashLower && e.actualTxHash && e.actualTxHash.toLowerCase() === actualHashLower) ||
+        (Math.abs(e.time - dep.time) < 10 && Math.abs(e.amount - dep.amount) < 0.01)
+      );
+
       if (existing) {
-        if (dep.actualTxHash && !existing.actualTxHash) {
-          await ctx.db.patch(existing._id, { actualTxHash: dep.actualTxHash.toLowerCase() });
+        if (actualHashLower && !existing.actualTxHash) {
+          await ctx.db.patch(existing._id, { actualTxHash: actualHashLower });
         }
       } else {
-        await ctx.db.insert("deposits", {
+        missingDeposits.push({
           contractAddress: contractLower,
           user: userLower,
           amount: dep.amount,
           time: dep.time,
           txHash: txHashLower,
-          actualTxHash: dep.actualTxHash ? dep.actualTxHash.toLowerCase() : undefined,
+          actualTxHash: actualHashLower,
         });
       }
+    }
+
+    // Sort missing deposits chronologically ascending
+    missingDeposits.sort((a, b) => a.time - b.time);
+
+    for (const depDoc of missingDeposits) {
+      await ctx.db.insert("deposits", depDoc);
     }
   },
 });
@@ -54,26 +77,49 @@ export const syncWithdrawals = mutation({
   handler: async (ctx, args) => {
     const contractLower = args.contractAddress.toLowerCase();
     const userLower = args.user.toLowerCase();
+
+    // Query existing withdrawals for this user in Convex DB (Source of Truth)
+    const existingUserWithdrawals = await ctx.db
+      .query("withdrawals")
+      .withIndex("by_contract_address_user", (q) =>
+        q.eq("contractAddress", contractLower).eq("user", userLower)
+      )
+      .collect();
+
+    const missingWithdrawals = [];
+
     for (const w of args.withdrawals) {
       const txHashLower = w.txHash.toLowerCase();
-      const existing = await ctx.db
-        .query("withdrawals")
-        .withIndex("by_txHash", (q) => q.eq("txHash", txHashLower))
-        .unique();
+      const actualHashLower = w.actualTxHash ? w.actualTxHash.toLowerCase() : undefined;
+
+      // Check if withdrawal already exists in Convex DB
+      const existing = existingUserWithdrawals.find(e => 
+        e.txHash.toLowerCase() === txHashLower ||
+        (actualHashLower && e.actualTxHash && e.actualTxHash.toLowerCase() === actualHashLower) ||
+        (Math.abs(e.time - w.time) < 10 && Math.abs(e.amount - w.amount) < 0.01)
+      );
+
       if (existing) {
-        if (w.actualTxHash && !existing.actualTxHash) {
-          await ctx.db.patch(existing._id, { actualTxHash: w.actualTxHash.toLowerCase() });
+        if (actualHashLower && !existing.actualTxHash) {
+          await ctx.db.patch(existing._id, { actualTxHash: actualHashLower });
         }
       } else {
-        await ctx.db.insert("withdrawals", {
+        missingWithdrawals.push({
           contractAddress: contractLower,
           user: userLower,
           amount: w.amount,
           time: w.time,
           txHash: txHashLower,
-          actualTxHash: w.actualTxHash ? w.actualTxHash.toLowerCase() : undefined,
+          actualTxHash: actualHashLower,
         });
       }
+    }
+
+    // Sort missing withdrawals chronologically ascending
+    missingWithdrawals.sort((a, b) => a.time - b.time);
+
+    for (const wDoc of missingWithdrawals) {
+      await ctx.db.insert("withdrawals", wDoc);
     }
   },
 });
