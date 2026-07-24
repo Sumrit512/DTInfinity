@@ -899,12 +899,29 @@ export default function Dashboard() {
             const tierIdx = Number(parsed.args.tierIndex);
             const chooseInstant = parsed.args.chooseInstant;
             const tier = PERFORMANCE_TIERS[tierIdx] || { instant: 0, daily: 0 };
+            let actualAmount = chooseInstant ? tier.instant : 0;
+
+            if (chooseInstant && receipt && receipt.logs) {
+              const usdtIface = new ethers.Interface(USDT_ABI);
+              const userAddrLower = parsed.args.user.toLowerCase();
+              for (const rLog of receipt.logs) {
+                try {
+                  const uParsed = usdtIface.parseLog(rLog);
+                  if (uParsed && uParsed.name === "Transfer" && uParsed.args.to.toLowerCase() === userAddrLower) {
+                    const netAmt = parseFloat(ethers.formatUnits(uParsed.args.value, 18));
+                    actualAmount = Math.round((netAmt / 0.90) * 100) / 100;
+                    break;
+                  }
+                } catch (_) {}
+              }
+            }
+
             eventsToSave.push({
               user: parsed.args.user.toLowerCase(),
               type: chooseInstant ? "perf_instant" : "perf_claim",
               typeName: chooseInstant ? "Performance Bonus (Instant)" : "Performance Bonus Claimed",
               fromUser: "contract",
-              amount: chooseInstant ? tier.instant : 0,
+              amount: actualAmount,
               level: "-",
               timestamp: Number(parsed.args.time),
               status: "Completed",
@@ -1351,37 +1368,7 @@ export default function Dashboard() {
       }
     });
 
-    const ascList = [...baseTxs].sort((a, b) => a.timestamp - b.timestamp);
-    let currentDeposit = 0;
-    let cumulativeNetworkEarned = 0;
-
-    const cappedList = ascList.map(evt => {
-      if (evt.type === "deposit") {
-        currentDeposit += evt.amount;
-        return evt;
-      }
-      if (evt.type === "withdraw") return evt;
-
-      const maxNetworkCap = currentDeposit * 4.0;
-      const remNetCap = Math.max(0, maxNetworkCap - cumulativeNetworkEarned);
-
-      let amt = evt.amount;
-      if (["perf_instant", "perf_daily", "perf_claim"].includes(evt.type)) {
-        amt = Math.min(amt, remNetCap);
-        amt = Math.round(amt * 1e8) / 1e8;
-      }
-
-      if (["level_income", "level_roi", "perf_instant", "perf_daily", "perf_claim"].includes(evt.type)) {
-        cumulativeNetworkEarned += amt;
-      }
-
-      return {
-        ...evt,
-        amount: amt
-      };
-    });
-
-    cappedList.sort((a, b) => {
+    baseTxs.sort((a, b) => {
       const diff = sortOrder === "asc" ? a.timestamp - b.timestamp : b.timestamp - a.timestamp;
       if (diff !== 0) return diff;
       const priorityMapAsc = { roi: 0, booster_roi: 0, level_income: 1, level_roi: 1, deposit: 2, withdraw: 2, perf_daily: 3, perf_instant: 3, perf_claim: 3 };
@@ -1392,7 +1379,7 @@ export default function Dashboard() {
       return prioA - prioB;
     });
 
-    return cappedList;
+    return baseTxs;
   }, [dbLedger, walletConnected, isRegistered, sortOrder, userData, oneDay, perfOneDay, treeNodes, effectiveActiveBonuses, secondsSinceSync, walletAddress]);
 
   const txs = useMemo(() => {

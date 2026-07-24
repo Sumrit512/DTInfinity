@@ -194,20 +194,13 @@ export const fetchAndSyncLogs = action({
         } else if (topic0 === TOPICS.PerformanceBonusClaimed) {
           const tierIndex    = Number(decodeUint256(dataHex.slice(0, 64)));
           const chooseInstant = Number(decodeUint256(dataHex.slice(64, 128))) !== 0;
-          let amount = 0;
-          let time = 0;
-          if (dataHex.length >= 256) {
-            amount = Number(decodeUint256(dataHex.slice(128, 192))) / 1e18;
-            time = Number(decodeUint256(dataHex.slice(192, 256)));
-          } else {
-            time = Number(decodeUint256(dataHex.slice(128, 192)));
-            amount = chooseInstant ? (perfTiers[tierIndex]?.instant || 0) : 0;
-          }
+          const time         = Number(decodeUint256(dataHex.slice(128, 192)));
+          const tier = perfTiers[tierIndex] || { instant: 0, daily: 0 };
           events.push({
             type: chooseInstant ? "perf_instant" : "perf_claim",
             typeName: chooseInstant ? "Performance Bonus (Instant)" : "Performance Bonus Claimed",
             fromUser: "contract",
-            amount,
+            amount: chooseInstant ? tier.instant : 0,
             level: "-",
             timestamp: time,
             status: "Completed",
