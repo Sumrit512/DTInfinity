@@ -328,15 +328,14 @@ export default function DashboardView({
               <h3 className="card-title">Daily ROI & Booster Capping (220%)</h3>
               <p className="card-subtitle">Maximum yield threshold for personal deposits</p>
             </div>
-            <div className="mono" style={{ fontSize: "13px", fontWeight: "600", color: "var(--blue-bright)" }}>
+            <div className="mono" style={{ fontSize: "16px", fontWeight: "800", color: "#f3ba2f", background: "rgba(243, 186, 47, 0.15)", padding: "4px 10px", borderRadius: "8px", border: "1px solid rgba(243, 186, 47, 0.3)" }}>
               {roiCapPercent.toFixed(1)}%
             </div>
           </div>
           <div className="cap-bar-track" style={{ height: "10px", background: "var(--surface-2)", borderRadius: "5px", overflow: "hidden", margin: "15px 0" }}>
             <div className="cap-bar-fill" style={{ width: `${roiCapPercent}%`, height: "100%", background: "var(--blue-bright)", transition: "width 0.4s ease" }}></div>
           </div>
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", color: "var(--text-muted)" }}>
-            <span>Earned: {statsToDisplay.totalROI} USDT</span>
+          <div style={{ display: "flex", justifyContent: "flex-end", fontSize: "12px", color: "var(--text-muted)" }}>
             <span>Max Cap: {maxRoiCap.toFixed(2)} USDT</span>
           </div>
         </div>
@@ -347,15 +346,14 @@ export default function DashboardView({
               <h3 className="card-title">Network Earnings Capping (400%)</h3>
               <p className="card-subtitle">Level Income, Matching & Performance Limit</p>
             </div>
-            <div className="mono" style={{ fontSize: "13px", fontWeight: "600", color: "var(--blue-bright)" }}>
+            <div className="mono" style={{ fontSize: "16px", fontWeight: "800", color: "#10b981", background: "rgba(16, 185, 129, 0.15)", padding: "4px 10px", borderRadius: "8px", border: "1px solid rgba(16, 185, 129, 0.3)" }}>
               {networkCapPercent.toFixed(1)}%
             </div>
           </div>
           <div className="cap-bar-track" style={{ height: "10px", background: "var(--surface-2)", borderRadius: "5px", overflow: "hidden", margin: "15px 0" }}>
             <div className="cap-bar-fill" style={{ width: `${networkCapPercent}%`, height: "100%", background: "linear-gradient(90deg, var(--blue-bright), var(--up))", transition: "width 0.4s ease" }}></div>
           </div>
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", color: "var(--text-muted)" }}>
-            <span>Total Network Earned: {totalEarnedAcrossStreams} USDT</span>
+          <div style={{ display: "flex", justifyContent: "flex-end", fontSize: "12px", color: "var(--text-muted)" }}>
             <span>Max Cap: {maxNetworkCap.toFixed(2)} USDT</span>
           </div>
         </div>
