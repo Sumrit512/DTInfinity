@@ -191,7 +191,6 @@ export default function DashboardView({
           <div className="stat-val display" style={{ color: "var(--blue-bright)" }}>
             {totalAvailableBalance} <span className="unit">USDT</span>
           </div>
-          <div className="stat-desc">Accumulated yield ready for instant withdrawal</div>
           <div style={{ marginTop: "15px" }}>
             <button
               onClick={handleClaimAll}
