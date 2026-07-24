@@ -311,7 +311,8 @@ export default function Dashboard() {
         savedDT.toLowerCase() === "0x229e2e8ef23c4e0c558c9473baaee3ff330c50b1".toLowerCase() ||
         savedDT.toLowerCase() === "0x858b5e656355401bb099c5120715d25761a8d1c2".toLowerCase() ||
         savedDT.toLowerCase() === "0x98D4730F214f6386a0C12626f4C87Fb4114B8ECD".toLowerCase() ||
-        savedDT.toLowerCase() === "0x03b628429b45A78ad47a922Ca6Fc7ce5515a69A1".toLowerCase()
+        savedDT.toLowerCase() === "0x03b628429b45A78ad47a922Ca6Fc7ce5515a69A1".toLowerCase() ||
+        savedDT.toLowerCase() === "0x360D67b9F9EAa887754200EEa4c8E8E368784f51".toLowerCase()
       )) {
         localStorage.removeItem("DT_INFINITY_ADDRESS");
         localStorage.removeItem("USDT_ADDRESS");
