@@ -1229,6 +1229,16 @@ export default function Dashboard() {
     const userDepNum = parseFloat(userData.totalDeposits || "0");
     const regTimeNum = Number(userData.registrationTime || 0);
 
+    const totalEarnedSoFar = parseFloat(userData.levelIncomeEarned || "0") +
+                            parseFloat(userData.levelROIEarned || "0") +
+                            parseFloat(userData.performanceBonusEarned || "0") +
+                            parseFloat(userData.dailyROIEarned || "0") +
+                            parseFloat(userData.roiBoosterEarned || "0");
+    const maxNetworkCap = userDepNum * 4.0;
+    if (userDepNum > 0 && totalEarnedSoFar >= maxNetworkCap) {
+      return [];
+    }
+
     (pendingQualifications || []).forEach(qual => {
       const claimTimeNum = Number(qual.claimTime);
       const endClaimTime = claimTimeNum + Number(perfOneDay || 60n);

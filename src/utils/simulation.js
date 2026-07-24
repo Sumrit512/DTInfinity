@@ -479,6 +479,21 @@ export function generateEventsList(
   const userAddrLower = addr ? addr.toLowerCase() : "";
 
   if (onChainEvents && onChainEvents.length > 0) {
+    onChainEvents.forEach(e => {
+      if (!e.isSimulated && (!e.user || e.user.toLowerCase() === userAddrLower)) {
+        if (e.type === "level_income") {
+          accumulatedLevelIncome += e.amount;
+          cumulativeTotalEarned += e.amount;
+        } else if (e.type === "level_roi") {
+          accumulatedLevelROI += e.amount;
+          cumulativeTotalEarned += e.amount;
+        } else if (e.type === "perf_claim" || e.type === "perf_instant") {
+          accumulatedPerf += e.amount;
+          cumulativeTotalEarned += e.amount;
+        }
+      }
+    });
+
     const realRoiEvents = onChainEvents
       .filter(e => e.type === "roi" && !e.isSimulated && (!e.user || e.user.toLowerCase() === userAddrLower))
       .sort((a, b) => a.timestamp - b.timestamp);
@@ -658,9 +673,9 @@ export function generateEventsList(
         const baseDailyRate = 50; // 0.5%
         const boosterRateBps = Math.max(0, rateBps - 50);
 
-        if (evt.timestamp > lastUpdateROI && targetDailyROI > 0 && accumulatedDailyROI < targetDailyROI - 0.0001) {
+        if (evt.timestamp > lastUpdateROI && (targetDailyROI === 0 || accumulatedDailyROI < targetDailyROI - 0.0001)) {
           let baseAmt = (depAmount * baseDailyRate) / 10000;
-          if (accumulatedDailyROI + baseAmt > targetDailyROI) {
+          if (targetDailyROI > 0 && accumulatedDailyROI + baseAmt > targetDailyROI) {
             baseAmt = targetDailyROI - accumulatedDailyROI;
           }
           const curRemDepCap = Math.max(0, depMaxCap - (depositROIEarnedMap[depIdx] || 0));
@@ -687,9 +702,9 @@ export function generateEventsList(
           }
         }
 
-        if (boosterRateBps > 0 && evt.timestamp > lastUpdateBooster && targetBoosterROI > 0 && accumulatedBoosterROI < targetBoosterROI - 0.0001) {
+        if (boosterRateBps > 0 && evt.timestamp > lastUpdateBooster && (targetBoosterROI === 0 || accumulatedBoosterROI < targetBoosterROI - 0.0001)) {
           let boosterAmt = (depAmount * boosterRateBps) / 10000;
-          if (accumulatedBoosterROI + boosterAmt > targetBoosterROI) {
+          if (targetBoosterROI > 0 && accumulatedBoosterROI + boosterAmt > targetBoosterROI) {
             boosterAmt = targetBoosterROI - accumulatedBoosterROI;
           }
           const curRemDepCap = Math.max(0, depMaxCap - (depositROIEarnedMap[depIdx] || 0));
@@ -782,6 +797,19 @@ export function generateSimulatedLedger(addr, basicInfo, incomeInfo, directs, cu
   }
 
   if (!basicInfo || Number(basicInfo.registrationTime) === 0 || basicInfo.totalDeposits === 0n) {
+    return [];
+  }
+
+  const totalEarnedSoFar = incomeInfo ? (
+    safeFloat(ethers.formatUnits(incomeInfo.dailyROIEarned || 0n, 18)) +
+    safeFloat(ethers.formatUnits(incomeInfo.roiBoosterEarned || 0n, 18)) +
+    safeFloat(ethers.formatUnits(incomeInfo.levelIncomeEarned || 0n, 18)) +
+    safeFloat(ethers.formatUnits(incomeInfo.levelROIEarned || 0n, 18)) +
+    safeFloat(ethers.formatUnits(incomeInfo.performanceBonusEarned || 0n, 18))
+  ) : 0;
+
+  const maxNetCap = sponsorDeposit * 4.0;
+  if (totalEarnedSoFar >= maxNetCap) {
     return [];
   }
 
