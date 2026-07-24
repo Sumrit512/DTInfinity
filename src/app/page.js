@@ -1346,7 +1346,7 @@ export default function Dashboard() {
       userData.levelIncomeEarned || "0",
       "0",
       "0",
-      userData.boosterRate || 0,
+      parseFloat(userData.boosterRate || "0.5"),
       Number(oneDay || 180n),
       Number(perfOneDay || 60n),
       treeNodes,
