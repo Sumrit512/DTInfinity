@@ -133,34 +133,6 @@ export function generateEventsList(
   const targetLevelROI = parseFloat(levelROIEarned) || 0;
   const targetPerf = parseFloat(performanceBonusEarned) || 0;
 
-  function getBoosterRateAtTime(timestamp) {
-    let refs5 = 0, refs10 = 0, refs15 = 0, refs20 = 0, refs25 = 0;
-    const currentSponsorDep = getActiveDepositAtTime(timestamp);
-
-    for (const d of directsData) {
-      if (d.registrationTime > timestamp) continue;
-      if (d.registrationTime > regTime + 25 * ONE_DAY_SECS) continue;
-
-      if (d.totalDeposits >= currentSponsorDep && currentSponsorDep > 0) {
-        if (d.registrationTime >= regTime) {
-          const diff = d.registrationTime - regTime;
-          if (diff <= 5 * ONE_DAY_SECS) refs5++;
-          if (diff <= 10 * ONE_DAY_SECS) refs10++;
-          if (diff <= 15 * ONE_DAY_SECS) refs15++;
-          if (diff <= 20 * ONE_DAY_SECS) refs20++;
-          if (diff <= 25 * ONE_DAY_SECS) refs25++;
-        }
-      }
-    }
-
-    if (refs25 >= 10) return 400;
-    if (refs20 >= 8) return 250;
-    if (refs15 >= 6) return 200;
-    if (refs10 >= 4) return 150;
-    if (refs5 >= 2) return 100;
-    return 50;
-  }
-
   // 3. Build Candidate Event Timeline
   const candidateEvents = [];
 
