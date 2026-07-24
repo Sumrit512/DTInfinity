@@ -8,7 +8,8 @@ export const USDT_ABI = [
   "function allowance(address owner, address spender) external view returns (uint256)",
   "function approve(address spender, uint256 amount) external returns (bool)",
   "function mint(address to, uint256 amount) external",
-  "function decimals() external view returns (uint8)"
+  "function decimals() external view returns (uint8)",
+  "event Transfer(address indexed from, address indexed to, uint256 value)"
 ];
 
 // DTInfinity ABI

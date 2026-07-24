@@ -211,6 +211,7 @@ export const syncMissedTx = action({
       // Fetch user profile state & transaction lists on-chain to do mapping
       const dtContractInstance = new ethers.Contract(dtInfinityAddress, [
         "function getUserBasicInfo(address user) external view returns (address sponsor, uint256 totalDeposits, uint256 registrationTime, uint256 lastUpdateROI, uint256 claimableBalance, uint256 totalWithdrawn)",
+        "function getUserIncomeInfo(address user) external view returns (uint256 dailyROIEarned, uint256 roiBoosterEarned, uint256 levelIncomeEarned, uint256 levelROIEarned, uint256 performanceBonusEarned)",
         "function getUserNetworkInfo(address user) external view returns (uint256 directCount, uint256 qualifiedDirectsCount, uint256 totalTeamCount, uint256 totalTeamVolume, address strongestLegAddress, uint256 strongestLegVolume)",
         "function getBoosterRate(address userAddr) external view returns (uint256)",
         "function getUserDeposits(address userAddr) external view returns (tuple(uint256 amount, uint256 time, uint256 lastUpdateROI, uint256 dailyROIEarned, uint256 roiBoosterEarned, uint256 rateBps, bool isFirstDeposit)[])",
@@ -274,7 +275,28 @@ export const syncMissedTx = action({
         });
       } else if (type === "perf_claim") {
         const PERFORMANCE_TIERS = [75, 150, 375, 750, 2250, 7500];
-        const instantReward = chooseInstant ? PERFORMANCE_TIERS[tierIndex] : 0;
+        let finalAmount = chooseInstant ? PERFORMANCE_TIERS[tierIndex] : 0;
+
+        if (chooseInstant) {
+          try {
+            const incInfo = await dtContractInstance.getUserIncomeInfo(user);
+            const perfEarnedOnChain = parseFloat(ethers.formatUnits(incInfo.performanceBonusEarned, 18));
+            if (perfEarnedOnChain > 0) {
+              const allEventsInTable = await ctx.db.query("onChainEvents").collect();
+              const priorPerfInDB = allEventsInTable
+                .filter(e => e.user && e.user.toLowerCase() === user.toLowerCase() && 
+                             (e.type === "perf_instant" || e.type === "perf_claim" || e.type === "perf_daily") && 
+                             e.txHash !== txHash)
+                .reduce((sum, e) => sum + (e.amount || 0), 0);
+              const diff = perfEarnedOnChain - priorPerfInDB;
+              if (diff > 0) {
+                finalAmount = Math.round(diff * 1e8) / 1e8;
+              }
+            }
+          } catch (e) {
+            console.warn("Could not calculate on-chain capped instant bonus", e);
+          }
+        }
         
         await ctx.runMutation(api.events.syncOnChainEvents, {
           contractAddress: dtInfinityAddress,
@@ -283,7 +305,7 @@ export const syncMissedTx = action({
             type: chooseInstant ? "perf_instant" : "perf_claim",
             typeName: chooseInstant ? "Performance Bonus (Instant)" : "Performance Bonus Claimed",
             fromUser: "Contract",
-            amount: instantReward,
+            amount: finalAmount,
             level: "-",
             timestamp: time,
             status: "Completed",

@@ -259,6 +259,25 @@ export const getLedger = query({
   }
 });
 
+export const patchEventAmount = mutation({
+  args: {
+    txHash: v.string(),
+    amount: v.number()
+  },
+  handler: async (ctx, args) => {
+    const txHashLower = args.txHash.toLowerCase();
+    const all = await ctx.db.query("onChainEvents").collect();
+    let updatedCount = 0;
+    for (const doc of all) {
+      if (doc.txHash && doc.txHash.toLowerCase() === txHashLower) {
+        await ctx.db.patch(doc._id, { amount: args.amount });
+        updatedCount++;
+      }
+    }
+    return updatedCount;
+  }
+});
+
 export const correctPerfInstantAmount = mutation({
   args: {
     txHash: v.string(),
