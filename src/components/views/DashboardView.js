@@ -366,7 +366,6 @@ export default function DashboardView({
       {/* REFERRAL LINK SHARE SECTION */}
       <div className="card" style={{ marginTop: "20px" }}>
         <h3 className="card-title">Your Referral Invitation Link</h3>
-        <p className="card-subtitle">Share your unique link to invite partners and earn up to 5 levels of Level Income & matching ROI.</p>
         <div style={{ display: "flex", gap: "10px", marginTop: "15px", flexWrap: "wrap" }}>
           <input
             type="text"
