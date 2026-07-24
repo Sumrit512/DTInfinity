@@ -72,7 +72,13 @@ export function generateEventsList(
     return depSum;
   }
 
+  const passedBps = Math.round((parseFloat(boosterRate) || 0.5) * 100);
+
   function getBoosterRateAtTime(timestamp) {
+    if (passedBps <= 50) {
+      return 50;
+    }
+
     let refs5 = 0, refs10 = 0, refs15 = 0, refs20 = 0, refs25 = 0;
     const currentSponsorDep = getActiveDepositAtTime(timestamp);
 
@@ -92,12 +98,14 @@ export function generateEventsList(
       }
     }
 
-    if (refs25 >= 10) return 400;
-    if (refs20 >= 8) return 250;
-    if (refs15 >= 6) return 200;
-    if (refs10 >= 4) return 150;
-    if (refs5 >= 2) return 100;
-    return 50;
+    let calculatedRate = 50;
+    if (refs25 >= 10) calculatedRate = 400;
+    else if (refs20 >= 8) calculatedRate = 250;
+    else if (refs15 >= 6) calculatedRate = 200;
+    else if (refs10 >= 4) calculatedRate = 150;
+    else if (refs5 >= 2) calculatedRate = 100;
+
+    return Math.min(calculatedRate, passedBps > 50 ? passedBps : calculatedRate);
   }
 
   // Calculate total expected daily and booster ROI accrued from elapsed intervals up to now
