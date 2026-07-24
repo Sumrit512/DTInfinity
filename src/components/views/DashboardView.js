@@ -260,7 +260,7 @@ export default function DashboardView({
 
       {/* TEAM NETWORK BUSINESS BREAKDOWN */}
       <div style={{ marginTop: "24px", marginBottom: "24px" }}>
-        <h3 className="section-title">Team Network Business Breakdown</h3>
+        <h3 className="section-title">Total Team Network Business</h3>
         <div className="grid-2">
           <div className="card" style={{ background: "var(--surface-2)", border: "1px solid var(--border)" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
