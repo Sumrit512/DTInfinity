@@ -34,7 +34,11 @@ export default function DashboardView({
     return () => clearInterval(interval);
   }, []);
 
-  const validQualifications = (pendingQualifications || []).filter(qual => !qual.isCappedAtStart);
+  const userDepNum = parseFloat(userData?.totalDeposits || "0");
+  const maxNetCap = userDepNum * 4.0;
+  const isUserCapped = userDepNum > 0 && parseFloat(totalEarnedAcrossStreams || "0") >= maxNetCap - 0.001;
+
+  const validQualifications = isUserCapped ? [] : (pendingQualifications || []).filter(qual => !qual.isCappedAtStart);
 
   return (
     <div className="view active">
@@ -109,7 +113,7 @@ export default function DashboardView({
                         </svg>
                         Claim Window Closes In: <span className="mono" style={{ color: "#fff", background: "rgba(16, 185, 129, 0.15)", padding: "2px 6px", borderRadius: "4px" }}>{formatCountdown(timeLeft)}</span>
                       </div>
-                      
+
                       {networkCapPercent >= 100 ? (
                         <div style={{
                           background: "rgba(239, 68, 68, 0.1)",

@@ -743,44 +743,53 @@ export default function Dashboard() {
         try {
           const nowUnix = Math.floor(Date.now() / 1000);
           const userDepNum = parseFloat(ethers.formatUnits(basicInfo.totalDeposits || 0n, 18));
+          const maxNetCap = userDepNum * 4.0;
+          const totEarnedOnChain = parseFloat(formatUSDT(incomeInfo.dailyROIEarned)) +
+                                  parseFloat(formatUSDT(incomeInfo.roiBoosterEarned)) +
+                                  parseFloat(formatUSDT(incomeInfo.levelIncomeEarned)) +
+                                  parseFloat(formatUSDT(incomeInfo.levelROIEarned)) +
+                                  parseFloat(formatUSDT(incomeInfo.performanceBonusEarned));
+          const isUserCappedOnChain = userDepNum > 0 && totEarnedOnChain >= maxNetCap - 0.001;
 
-          for (let t = 0; t < 6; t++) {
-            const isPending = await dtContract.pendingTiers(addr, t);
-            if (isPending) {
-              const isCappedAtStart = await dtContract.pendingTierCappedAtStart(addr, t);
-              if (isCappedAtStart) continue; // Skip ineligible capped qualification
+          if (!isUserCappedOnChain) {
+            for (let t = 0; t < 6; t++) {
+              const isPending = await dtContract.pendingTiers(addr, t);
+              if (isPending) {
+                const isCappedAtStart = await dtContract.pendingTierCappedAtStart(addr, t);
+                if (isCappedAtStart) continue; // Skip ineligible capped qualification
 
-              const claimTime = await dtContract.qualificationMonth(addr, t);
-              const claimTimeNum = Number(claimTime);
-              const endClaimTime = claimTimeNum + Number(currentPerfOneDayVal || 86400n);
-              const isClaimWindowActive = nowUnix >= claimTimeNum && nowUnix < endClaimTime;
-              const isExpired = nowUnix >= endClaimTime;
+                const claimTime = await dtContract.qualificationMonth(addr, t);
+                const claimTimeNum = Number(claimTime);
+                const endClaimTime = claimTimeNum + Number(currentPerfOneDayVal || 86400n);
+                const isClaimWindowActive = nowUnix >= claimTimeNum && nowUnix < endClaimTime;
+                const isExpired = nowUnix >= endClaimTime;
 
-              if (isExpired && !isCappedAtStart && userDepNum >= 50) {
-                const hasExistingBonus = bonusesMapped.some(b => b.tierIndex === t);
-                if (!hasExistingBonus) {
-                  bonusesMapped.push({
-                    tierIndex: t,
-                    dailyRate: PERFORMANCE_TIERS[t].daily,
-                    startTime: claimTimeNum,
-                    endTime: claimTimeNum + 30 * Number(currentPerfOneDayVal || 86400n),
-                    lastClaimTime: claimTimeNum,
-                    isDefaultedExpired: true
-                  });
+                if (isExpired && !isCappedAtStart && userDepNum >= 50) {
+                  const hasExistingBonus = bonusesMapped.some(b => b.tierIndex === t);
+                  if (!hasExistingBonus) {
+                    bonusesMapped.push({
+                      tierIndex: t,
+                      dailyRate: PERFORMANCE_TIERS[t].daily,
+                      startTime: claimTimeNum,
+                      endTime: claimTimeNum + 30 * Number(currentPerfOneDayVal || 86400n),
+                      lastClaimTime: claimTimeNum,
+                      isDefaultedExpired: true
+                    });
+                  }
                 }
+                
+                qualifications.push({
+                  tierIndex: t,
+                  target: PERFORMANCE_TIERS[t].target,
+                  instant: PERFORMANCE_TIERS[t].instant,
+                  daily: PERFORMANCE_TIERS[t].daily,
+                  isPending,
+                  claimTime: claimTimeNum,
+                  isClaimWindowActive,
+                  isExpired,
+                  isCappedAtStart
+                });
               }
-              
-              qualifications.push({
-                tierIndex: t,
-                target: PERFORMANCE_TIERS[t].target,
-                instant: PERFORMANCE_TIERS[t].instant,
-                daily: PERFORMANCE_TIERS[t].daily,
-                isPending,
-                claimTime: claimTimeNum,
-                isClaimWindowActive,
-                isExpired,
-                isCappedAtStart
-              });
             }
           }
           setActiveBonuses([...bonusesMapped]);
