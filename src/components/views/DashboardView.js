@@ -248,7 +248,6 @@ export default function DashboardView({
             <div className="icon">🔄</div>
             <div className="name">Level ROI</div>
             <div className="amt" style={{ color: "#60a5fa" }}>{statsToDisplay.levelROI} <span style={{ fontSize: "13px", color: "var(--text-muted)" }}>USDT</span></div>
-            <div className="sub">20 Levels matching ROI yield</div>
           </div>
 
           <div className="income-card">
