@@ -569,8 +569,9 @@ export function generateEventsList(
       const dailyRate = (activeBonuses && activeBonuses.length > 0) ? activeBonuses[0].dailyRate : 5;
       const numPayouts = Math.round(e.amount / dailyRate);
       if (numPayouts > 0) {
-        for (let i = 1; i <= numPayouts; i++) {
-          const payoutTime = lastUpdatePerf + i * PERF_ONE_DAY_SECS;
+        const startTimeForChunk = e.timestamp - (numPayouts - 1) * PERF_ONE_DAY_SECS;
+        for (let i = 0; i < numPayouts; i++) {
+          const payoutTime = startTimeForChunk + i * PERF_ONE_DAY_SECS;
           if (payoutTime <= now && payoutTime >= regTime) {
             generated.push({
               type: "perf_daily",
@@ -580,14 +581,14 @@ export function generateEventsList(
               level: "-",
               timestamp: payoutTime,
               status: "Completed",
-              txHash: `0x_gen_perf_${lastUpdatePerf}_anchored_${idx}_${i}`,
+              txHash: `0x_gen_perf_${e.timestamp}_anchored_${idx}_${i}`,
               blockNumber: 0
             });
           }
         }
         accumulatedPerf += e.amount;
         cumulativeTotalEarned += e.amount;
-        lastUpdatePerf += numPayouts * PERF_ONE_DAY_SECS;
+        lastUpdatePerf = e.timestamp;
       }
     });
   }
