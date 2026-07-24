@@ -204,11 +204,10 @@ export default function DashboardView({
         </div>
 
         <div className="stat-card">
-          <div className="stat-label">Lifetime Total Earned</div>
+          <div className="stat-label">Total Earned</div>
           <div className="stat-val display" style={{ color: "#fff" }}>
             {totalEarnedAcrossStreams} <span className="unit">USDT</span>
           </div>
-          <div className="stat-desc">Sum of Daily ROI, Booster & Network Income</div>
         </div>
 
         <div className="stat-card">
