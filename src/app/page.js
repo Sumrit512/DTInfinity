@@ -239,10 +239,12 @@ export default function Dashboard() {
             const actualTxHash = (activeTx?.type === "deposit" && idx === deposits.length - 1)
               ? activeTx.hash
               : undefined;
+            const numAmount = typeof d.amount === "number" ? d.amount : parseFloat(ethers.formatUnits(d.amount || 0n, 18));
+            const numTime = Number(d.time || d.timestamp || 0);
             return {
-              amount: parseFloat(ethers.formatUnits(d.amount || 0n, 18)),
-              time: Number(d.time || 0n),
-              txHash: `0x_dep_${addr.toLowerCase()}_${idx}_${d.time}`,
+              amount: numAmount,
+              time: numTime,
+              txHash: `0x_dep_${addr.toLowerCase()}_${idx}_${numTime}`,
               actualTxHash,
             };
           }),
@@ -258,10 +260,12 @@ export default function Dashboard() {
             const actualTxHash = (activeTx?.type === "withdraw" && idx === withdrawals.length - 1)
               ? activeTx.hash
               : undefined;
+            const numAmount = typeof w.amount === "number" ? w.amount : parseFloat(ethers.formatUnits(w.amount || 0n, 18));
+            const numTime = Number(w.time || w.timestamp || 0);
             return {
-              amount: parseFloat(ethers.formatUnits(w.amount || 0n, 18)),
-              time: Number(w.time || 0n),
-              txHash: `0x_with_${addr.toLowerCase()}_${idx}_${w.time}`,
+              amount: numAmount,
+              time: numTime,
+              txHash: `0x_with_${addr.toLowerCase()}_${idx}_${numTime}`,
               actualTxHash,
             };
           }),
