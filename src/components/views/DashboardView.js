@@ -242,7 +242,6 @@ export default function DashboardView({
             <div className="icon">🤝</div>
             <div className="name">Level Income</div>
             <div className="amt" style={{ color: "var(--up)" }}>{statsToDisplay.levelIncome} <span style={{ fontSize: "13px", color: "var(--text-muted)" }}>USDT</span></div>
-            <div className="sub">5 Levels direct deposit bonus</div>
           </div>
 
           <div className="income-card">
