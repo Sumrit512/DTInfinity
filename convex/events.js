@@ -246,15 +246,46 @@ export const getLedger = query({
       }
     }
 
+    // Chronological capping pass ascending
+    const ascList = [...uniqueList].sort((a, b) => a.timestamp - b.timestamp);
+    let currentDeposit = 0;
+    let cumulativeNetworkEarned = 0;
+
+    const cappedList = ascList.map(evt => {
+      if (evt.type === "deposit") {
+        currentDeposit += evt.amount;
+        return evt;
+      }
+      if (evt.type === "withdraw") return evt;
+
+      const maxNetworkCap = currentDeposit * 4.0;
+      const remNetCap = Math.max(0, maxNetworkCap - cumulativeNetworkEarned);
+
+      let amt = evt.amount;
+      if (["perf_instant", "perf_daily", "perf_claim"].includes(evt.type)) {
+        amt = Math.min(amt, remNetCap);
+        amt = Math.round(amt * 1e8) / 1e8;
+      }
+
+      if (["level_income", "level_roi", "perf_instant", "perf_daily", "perf_claim"].includes(evt.type)) {
+        cumulativeNetworkEarned += amt;
+      }
+
+      return {
+        ...evt,
+        amount: amt
+      };
+    });
+
     // Sort by timestamp descending (latest first) with event type priority for equal timestamps
     const priorityMap = { perf_daily: 4, perf_instant: 4, perf_claim: 4, roi: 3, booster_roi: 3, level_income: 2, level_roi: 2, withdraw: 1, deposit: 0 };
-    uniqueList.sort((a, b) => {
+    cappedList.sort((a, b) => {
       if (a.timestamp !== b.timestamp) return b.timestamp - a.timestamp;
       const prioA = priorityMap[a.type] !== undefined ? priorityMap[a.type] : 2;
       const prioB = priorityMap[b.type] !== undefined ? priorityMap[b.type] : 2;
       return prioB - prioA;
     });
 
-    return uniqueList;
+    return cappedList;
   }
 });
