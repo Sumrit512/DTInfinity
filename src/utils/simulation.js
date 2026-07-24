@@ -22,8 +22,8 @@ export function generateEventsList(
   const regTime = Number(registrationTime || 0);
   if (regTime === 0) return [];
 
-  const ONE_DAY_SECS = Number(oneDayVal) || 180;
-  const PERF_ONE_DAY_SECS = Number(perfOneDayVal) || 60;
+  const ONE_DAY_SECS = Number(oneDayVal) || 1800;
+  const PERF_ONE_DAY_SECS = Number(perfOneDayVal) || 480;
   const now = Math.floor(Date.now() / 1000);
 
   // 1. Prepare user deposits timeline (sorted ascending)
@@ -571,7 +571,7 @@ export function generateEventsList(
       if (numPayouts > 0) {
         for (let i = 1; i <= numPayouts; i++) {
           const payoutTime = lastUpdatePerf + i * PERF_ONE_DAY_SECS;
-          if (payoutTime >= regTime) {
+          if (payoutTime <= now && payoutTime >= regTime) {
             generated.push({
               type: "perf_daily",
               typeName: "Performance Daily Salary",

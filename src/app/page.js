@@ -145,8 +145,8 @@ export default function Dashboard() {
   const [currentPage, setCurrentPage] = useState(1);
 
   // Real-time ticking simulation states
-  const [oneDay, setOneDay] = useState(180n);
-  const [perfOneDay, setPerfOneDay] = useState(60n);
+  const [oneDay, setOneDay] = useState(1800n);
+  const [perfOneDay, setPerfOneDay] = useState(480n);
   const [secondsSinceSync, setSecondsSinceSync] = useState(0);
 
   // Mobile responsiveness sidebar state
@@ -583,8 +583,8 @@ export default function Dashboard() {
       const dtContract = new ethers.Contract(dtInfinityAddress, DT_INFINITY_ABI, provider);
       const usdtContract = new ethers.Contract(usdtAddress, USDT_ABI, provider);
 
-      let currentOneDayVal = 180n;
-      let currentPerfOneDayVal = 60n;
+      let currentOneDayVal = 1800n;
+      let currentPerfOneDayVal = 480n;
       try {
         const [cUSDT, wUSDT, cOneDay, cPerfOneDay] = await Promise.all([
           usdtContract.balanceOf(dtInfinityAddress),
@@ -1362,8 +1362,8 @@ export default function Dashboard() {
       "0",
       "0",
       parseFloat(userData.boosterRate || "0.5"),
-      Number(oneDay || 180n),
-      Number(perfOneDay || 60n),
+      Number(oneDay || 1800n),
+      Number(perfOneDay || 480n),
       treeNodes,
       effectiveActiveBonuses,
       realDeposits,
