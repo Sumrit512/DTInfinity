@@ -335,8 +335,10 @@ export default function DashboardView({
           <div className="cap-bar-track" style={{ height: "10px", background: "var(--surface-2)", borderRadius: "5px", overflow: "hidden", margin: "15px 0" }}>
             <div className="cap-bar-fill" style={{ width: `${roiCapPercent}%`, height: "100%", background: "var(--blue-bright)", transition: "width 0.4s ease" }}></div>
           </div>
-          <div style={{ display: "flex", justifyContent: "flex-end", fontSize: "12px", color: "var(--text-muted)" }}>
-            <span>Max Cap: {maxRoiCap.toFixed(2)} USDT</span>
+          <div style={{ display: "flex", justifyContent: "flex-end" }}>
+            <span style={{ fontSize: "12px", fontWeight: "700", color: "#f3ba2f", background: "rgba(243, 186, 47, 0.12)", padding: "4px 10px", borderRadius: "6px", border: "1px solid rgba(243, 186, 47, 0.25)" }}>
+              Max Cap: {maxRoiCap.toFixed(2)} USDT
+            </span>
           </div>
         </div>
 
@@ -353,8 +355,10 @@ export default function DashboardView({
           <div className="cap-bar-track" style={{ height: "10px", background: "var(--surface-2)", borderRadius: "5px", overflow: "hidden", margin: "15px 0" }}>
             <div className="cap-bar-fill" style={{ width: `${networkCapPercent}%`, height: "100%", background: "linear-gradient(90deg, var(--blue-bright), var(--up))", transition: "width 0.4s ease" }}></div>
           </div>
-          <div style={{ display: "flex", justifyContent: "flex-end", fontSize: "12px", color: "var(--text-muted)" }}>
-            <span>Max Cap: {maxNetworkCap.toFixed(2)} USDT</span>
+          <div style={{ display: "flex", justifyContent: "flex-end" }}>
+            <span style={{ fontSize: "12px", fontWeight: "700", color: "#10b981", background: "rgba(16, 185, 129, 0.12)", padding: "4px 10px", borderRadius: "6px", border: "1px solid rgba(16, 185, 129, 0.25)" }}>
+              Max Cap: {maxNetworkCap.toFixed(2)} USDT
+            </span>
           </div>
         </div>
       </div>
