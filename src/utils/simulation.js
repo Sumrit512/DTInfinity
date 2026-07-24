@@ -72,6 +72,74 @@ export function generateEventsList(
     return depSum;
   }
 
+  function getQualifiedDirectsCountAtTime(parentAddr, timestamp) {
+    if (!treeNodes || !parentAddr) return 0;
+    const parentLower = parentAddr.toLowerCase();
+    
+    const directAddrs = new Set();
+    const parentNode = treeNodes[parentLower];
+    if (parentNode && parentNode.children) {
+      parentNode.children.forEach(c => directAddrs.add(c.toLowerCase()));
+    }
+    Object.keys(treeNodes).forEach(k => {
+      const node = treeNodes[k];
+      if (node && node.sponsor && node.sponsor.toLowerCase() === parentLower) {
+        directAddrs.add(k.toLowerCase());
+      }
+    });
+
+    let qualCount = 0;
+    directAddrs.forEach(childAddr => {
+      const childNode = treeNodes[childAddr];
+      if (childNode) {
+        let cumVol = 0;
+        if (childNode.deposits && childNode.deposits.length > 0) {
+          childNode.deposits.forEach(d => {
+            const dTime = Number(d.timestamp || d.time || childNode.registrationTime || 0);
+            if (dTime <= timestamp) {
+              cumVol += typeof d.amount === "number" ? d.amount : parseFloat(d.amount || 0);
+            }
+          });
+        } else {
+          const tDep = parseFloat(childNode.totalDeposits) || 0;
+          const regTime = Number(childNode.registrationTime || 0);
+          if (regTime <= timestamp) {
+            cumVol = tDep;
+          }
+        }
+        if (cumVol >= 50) {
+          qualCount++;
+        }
+      }
+    });
+    return qualCount;
+  }
+
+  function getCumulativeDepositAtTime(targetAddr, timestamp) {
+    if (!targetAddr) return 0;
+    if (targetAddr.toLowerCase() === addr.toLowerCase()) {
+      return getActiveDepositAtTime(timestamp);
+    }
+    const node = treeNodes ? treeNodes[targetAddr.toLowerCase()] : null;
+    if (!node) return 0;
+    let cum = 0;
+    if (node.deposits && node.deposits.length > 0) {
+      node.deposits.forEach(d => {
+        const dTime = Number(d.timestamp || d.time || node.registrationTime || 0);
+        if (dTime <= timestamp) {
+          cum += typeof d.amount === "number" ? d.amount : parseFloat(d.amount || 0);
+        }
+      });
+    } else {
+      const tDep = parseFloat(node.totalDeposits) || 0;
+      const regTime = Number(node.registrationTime || 0);
+      if (regTime <= timestamp) {
+        cum = tDep;
+      }
+    }
+    return cum;
+  }
+
   const passedBps = Math.round((parseFloat(boosterRate) || 0.5) * 100);
 
   function getBoosterRateAtTime(timestamp) {
@@ -173,30 +241,36 @@ export function generateEventsList(
               current = treeNodes[current.sponsor.toLowerCase()];
             }
             if (foundLevel > 0 && foundLevel <= 5) {
-              const levelPct = [0.05, 0.02, 0.01, 0.01, 0.01][foundLevel - 1] || 0;
-              const depAmt = typeof dep.amount === "number" ? dep.amount : parseFloat(dep.amount || 0);
               const depTime = Number(dep.timestamp || node.registrationTime || regTime);
-              const totalAmt = depAmt * levelPct;
-              if (totalAmt > 0) {
-                let remAmt = totalAmt;
-                let partIdx = 0;
-                const maxVal = 500;
-                while (remAmt > 0.001) {
-                  const partAmt = Math.min(maxVal, remAmt);
-                  const offsetTime = depTime + (partIdx * 60);
-                  candidateEvents.push({
-                    type: "candidate_level_income",
-                    typeName: "Level Income",
-                    fromUser: childAddr,
-                    amount: Math.round(partAmt * 1e8) / 1e8,
-                    level: foundLevel.toString(),
-                    timestamp: offsetTime,
-                    sortPriority: 2,
-                    txHash: `0x_gen_lvl_inc_${childAddr.toLowerCase()}_${dIdx}_${offsetTime}_${partIdx}`
-                  });
-                  candidateLevelIncSum += partAmt;
-                  remAmt = Math.round((remAmt - partAmt) * 1e8) / 1e8;
-                  partIdx++;
+              const parentDepAtTime = getCumulativeDepositAtTime(addr, depTime);
+              const qualDirectsAtTime = getQualifiedDirectsCountAtTime(addr, depTime);
+
+              // Smart contract rule: Recipient (parent) total deposits >= 10 USDT and qualifiedDirectsCount >= foundLevel
+              if (parentDepAtTime >= 10 && qualDirectsAtTime >= foundLevel) {
+                const levelPct = [0.05, 0.02, 0.01, 0.01, 0.01][foundLevel - 1] || 0;
+                const depAmt = typeof dep.amount === "number" ? dep.amount : parseFloat(dep.amount || 0);
+                const totalAmt = depAmt * levelPct;
+                if (totalAmt > 0) {
+                  let remAmt = totalAmt;
+                  let partIdx = 0;
+                  const maxVal = 500;
+                  while (remAmt > 0.001) {
+                    const partAmt = Math.min(maxVal, remAmt);
+                    const offsetTime = depTime + (partIdx * 60);
+                    candidateEvents.push({
+                      type: "candidate_level_income",
+                      typeName: "Level Income",
+                      fromUser: childAddr,
+                      amount: Math.round(partAmt * 1e8) / 1e8,
+                      level: foundLevel.toString(),
+                      timestamp: offsetTime,
+                      sortPriority: 2,
+                      txHash: `0x_gen_lvl_inc_${childAddr.toLowerCase()}_${dIdx}_${offsetTime}_${partIdx}`
+                    });
+                    candidateLevelIncSum += partAmt;
+                    remAmt = Math.round((remAmt - partAmt) * 1e8) / 1e8;
+                    partIdx++;
+                  }
                 }
               }
             }
@@ -321,9 +395,17 @@ export function generateEventsList(
           current = treeNodes[current.sponsor.toLowerCase()];
         }
         if (foundLevel > 0 && foundLevel <= 20) {
-          const expectedDaily = tDep * 0.005 * (levelROIPct[foundLevel - 1] || 0);
-          if (expectedDaily > 0) {
-            downlineContributions.push({ addr: childAddr, level: foundLevel, expectedDaily, childRegTime: Number(node.registrationTime || regTime) });
+          const childRegTime = Number(node.registrationTime || regTime);
+          const childDepAtTime = getCumulativeDepositAtTime(childAddr, childRegTime);
+          const parentDepAtTime = getCumulativeDepositAtTime(addr, childRegTime);
+          const qualDirectsAtTime = getQualifiedDirectsCountAtTime(addr, childRegTime);
+
+          // Smart contract rule: Child totalDeposits >= 50, Parent totalDeposits >= 50, Parent qualifiedDirectsCount >= foundLevel
+          if (childDepAtTime >= 50 && parentDepAtTime >= 50 && qualDirectsAtTime >= foundLevel) {
+            const expectedDaily = tDep * 0.005 * (levelROIPct[foundLevel - 1] || 0);
+            if (expectedDaily > 0) {
+              downlineContributions.push({ addr: childAddr, level: foundLevel, expectedDaily, childRegTime });
+            }
           }
         }
       }
