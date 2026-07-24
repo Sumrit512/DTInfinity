@@ -236,7 +236,6 @@ export default function DashboardView({
             <div className="icon">📈</div>
             <div className="name">Daily & Booster ROI</div>
             <div className="amt" style={{ color: "var(--blue-bright)" }}>{statsToDisplay.totalROI} <span style={{ fontSize: "13px", color: "var(--text-muted)" }}>USDT</span></div>
-            <div className="sub">Base 0.5% + Booster rate (Daily: {statsToDisplay.dailyROI} | Booster: {statsToDisplay.boosterROI})</div>
           </div>
 
           <div className="income-card">
