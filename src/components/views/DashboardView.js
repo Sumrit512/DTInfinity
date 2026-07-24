@@ -230,7 +230,7 @@ export default function DashboardView({
 
       {/* INCOME STREAMS BREAKDOWN */}
       <div style={{ marginTop: "24px", marginBottom: "24px" }}>
-        <h3 className="section-title">Income Streams Breakdown</h3>
+        <h3 className="section-title">Income details</h3>
         <div className="income-grid">
           <div className="income-card">
             <div className="icon">📈</div>
