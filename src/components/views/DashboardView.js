@@ -274,9 +274,6 @@ export default function DashboardView({
               </div>
               <div style={{ fontSize: "26px", background: "var(--blue-wash)", padding: "12px", borderRadius: "12px", display: "flex", alignItems: "center", justifyContent: "center" }}>📈</div>
             </div>
-            <div className="stat-desc" style={{ marginTop: "10px", fontSize: "12.5px", color: "var(--text-muted)" }}>
-              All-time cumulative deposit volume generated across all downline generations
-            </div>
           </div>
 
           <div className="card" style={{ background: "var(--surface-2)", border: "1px solid var(--border)" }}>
@@ -290,9 +287,6 @@ export default function DashboardView({
                 </div>
               </div>
               <div style={{ fontSize: "26px", background: "rgba(243, 186, 47, 0.1)", padding: "12px", borderRadius: "12px", display: "flex", alignItems: "center", justifyContent: "center" }}>📅</div>
-            </div>
-            <div className="stat-desc" style={{ marginTop: "10px", fontSize: "12.5px", color: "var(--text-muted)" }}>
-              Active volume for current calendar month (resets on the 1st of every month)
             </div>
           </div>
 
@@ -308,9 +302,6 @@ export default function DashboardView({
               </div>
               <div style={{ fontSize: "26px", background: "var(--blue-wash)", padding: "12px", borderRadius: "12px", display: "flex", alignItems: "center", justifyContent: "center" }}>⚡</div>
             </div>
-            <div className="stat-desc" style={{ marginTop: "10px", fontSize: "12.5px", color: "var(--text-muted)" }}>
-              Volume from your single highest performing direct leg ({shorten(userData.strongestLegAddress || "")})
-            </div>
           </div>
 
           <div className="card" style={{ background: "var(--surface-2)", border: "1px solid var(--border)" }}>
@@ -324,9 +315,6 @@ export default function DashboardView({
                 </div>
               </div>
               <div style={{ fontSize: "26px", background: "rgba(16, 185, 129, 0.1)", padding: "12px", borderRadius: "12px", display: "flex", alignItems: "center", justifyContent: "center" }}>🌐</div>
-            </div>
-            <div className="stat-desc" style={{ marginTop: "10px", fontSize: "12.5px", color: "var(--text-muted)" }}>
-              Combined volume from all remaining direct downline legs
             </div>
           </div>
         </div>
