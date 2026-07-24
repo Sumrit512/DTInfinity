@@ -258,7 +258,7 @@ export function generateEventsList(
                     const partAmt = Math.min(maxVal, remAmt);
                     const offsetTime = depTime + (partIdx * 60);
                     candidateEvents.push({
-                      type: "candidate_level_income",
+                      type: "level_income",
                       typeName: "Level Income",
                       fromUser: childAddr,
                       amount: Math.round(partAmt * 1e8) / 1e8,
@@ -299,7 +299,7 @@ export function generateEventsList(
     while (remDiff > 0.001 && incIdx < 100) {
       const entryAmt = Math.min(maxPerEntry, remDiff);
       candidateEvents.push({
-        type: "candidate_level_income",
+        type: "level_income",
         typeName: "Level Income",
         fromUser: fallbackL1Addr,
         amount: Math.round(entryAmt * 1e8) / 1e8,
@@ -418,7 +418,7 @@ export function generateEventsList(
         const dc = downlineContributions[cIdx];
         const payoutTime = Math.max(dc.childRegTime, regTime) + dayOffset * ONE_DAY_SECS + (cIdx * 10);
         candidateEvents.push({
-          type: "candidate_level_roi",
+          type: "level_roi",
           typeName: "Level ROI Matching",
           fromUser: dc.addr,
           amount: dc.expectedDaily,
@@ -441,7 +441,7 @@ export function generateEventsList(
       while (remLvlRoi > 0.001 && roiIdx < 100) {
         const entryAmt = Math.min(maxPerLvlRoiEntry, remLvlRoi);
         candidateEvents.push({
-          type: "candidate_level_roi",
+          type: "level_roi",
           typeName: "Level ROI Matching",
           fromUser: "Downline",
           amount: Math.round(entryAmt * 1e8) / 1e8,

@@ -1362,7 +1362,13 @@ export default function Dashboard() {
       if (sim.type === "roi" || sim.type === "booster_roi" || sim.type === "perf_daily") {
         baseTxs.push(sim);
       } else {
-        const isDuplicate = realEvents.some(real => real.type === sim.type && Math.abs(real.timestamp - sim.timestamp) < 60);
+        const normSimType = (sim.type || "").replace("candidate_", "");
+        const isDuplicate = realEvents.some(real => {
+          const normRealType = (real.type || "").replace("candidate_", "");
+          const isSameUser = real.fromUser && sim.fromUser && real.fromUser.toLowerCase() === sim.fromUser.toLowerCase();
+          const isSameLevel = String(real.level) === String(sim.level);
+          return normRealType === normSimType && (isSameUser || (isSameLevel && Math.abs(real.timestamp - sim.timestamp) < 300));
+        });
         if (!isDuplicate) {
           baseTxs.push(sim);
         }
