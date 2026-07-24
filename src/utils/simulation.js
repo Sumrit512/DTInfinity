@@ -473,20 +473,20 @@ export function generateEventsList(
       .filter(e => e.type === "perf_daily" && !e.isSimulated && (!e.user || e.user.toLowerCase() === userAddrLower))
       .sort((a, b) => a.timestamp - b.timestamp);
 
-    if (activeBonuses && activeBonuses.length > 0) {
-      lastUpdatePerf = activeBonuses[0].startTime;
-    } else if (realPerfEvents.length > 0) {
-      const firstEvtTime = realPerfEvents[0].timestamp;
-      const defaultStart = 1784773800;
-      lastUpdatePerf = firstEvtTime >= defaultStart ? defaultStart : firstEvtTime - 60;
-    }
-
     realPerfEvents.forEach((e, idx) => {
       const dailyRate = (activeBonuses && activeBonuses.length > 0) ? activeBonuses[0].dailyRate : 5;
       const numPayouts = Math.round(e.amount / dailyRate);
       if (numPayouts > 0) {
+        let batchStart = (activeBonuses && activeBonuses.length > 0 && activeBonuses[0].startTime) 
+          ? activeBonuses[0].startTime 
+          : Math.max(regTime, e.timestamp - numPayouts * PERF_ONE_DAY_SECS);
+        
+        if (batchStart < regTime) {
+          batchStart = regTime;
+        }
+
         for (let i = 1; i <= numPayouts; i++) {
-          const payoutTime = lastUpdatePerf + i * PERF_ONE_DAY_SECS;
+          const payoutTime = batchStart + i * PERF_ONE_DAY_SECS;
           generated.push({
             type: "perf_daily",
             typeName: "Performance Daily Salary",
@@ -495,13 +495,12 @@ export function generateEventsList(
             level: "-",
             timestamp: payoutTime,
             status: "Completed",
-            txHash: `0x_gen_perf_${lastUpdatePerf}_anchored_${idx}_${i}`,
+            txHash: `0x_gen_perf_${batchStart}_anchored_${idx}_${i}`,
             blockNumber: 0
           });
         }
         accumulatedPerf += e.amount;
         cumulativeTotalEarned += e.amount;
-        lastUpdatePerf += numPayouts * PERF_ONE_DAY_SECS;
       }
     });
   }
