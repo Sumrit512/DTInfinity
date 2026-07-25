@@ -366,9 +366,23 @@ export function generateEventsList(
     });
 
     uniqueBonuses.forEach((bonus, bIdx) => {
+      let anchoredCount = 0;
+      if (onChainEvents && onChainEvents.length > 0) {
+        onChainEvents.forEach(e => {
+          if (e.type === "perf_daily" && !e.isSimulated && (!e.user || e.user.toLowerCase() === userAddrLower)) {
+            if (e.tierIndex === bonus.tierIndex || Math.abs(e.timestamp - bonus.startTime) < 300) {
+              anchoredCount += Math.round(e.amount / bonus.dailyRate);
+            }
+          }
+        });
+      }
+      if (anchoredCount >= 30) {
+        return;
+      }
+
       const streamStart = bonus.startTime;
       const streamEnd = bonus.endTime > 0 ? bonus.endTime : streamStart + 30 * PERF_ONE_DAY_SECS;
-      let day = 1;
+      let day = anchoredCount + 1;
       while (true) {
         const salaryTime = streamStart + day * PERF_ONE_DAY_SECS;
         if (salaryTime > streamEnd || salaryTime > now || day > 30) break;
@@ -607,7 +621,7 @@ export function generateEventsList(
         }
         accumulatedPerf += e.amount;
         cumulativeTotalEarned += e.amount;
-        lastUpdatePerf = e.timestamp;
+        lastUpdatePerf = Math.max(lastUpdatePerf, startTimeForChunk + numPayouts * PERF_ONE_DAY_SECS);
       }
     });
   }
@@ -738,11 +752,11 @@ export function generateEventsList(
     if (evt.type === "candidate_perf_daily") {
       const hasAnchoredEvt = generated.some(g => 
         g.type === "perf_daily" && 
-        Math.abs(g.timestamp - evt.timestamp) < 300
+        Math.abs(g.timestamp - evt.timestamp) < 200
       );
       if (hasAnchoredEvt) continue;
 
-      if (evt.timestamp > now || evt.timestamp <= lastUpdatePerf) continue;
+      if (evt.timestamp > now) continue;
       if (targetPerf > 0 && accumulatedPerf >= targetPerf - 0.001) continue;
 
       let amt = evt.dailyRate;
