@@ -1421,7 +1421,7 @@ export default function Dashboard() {
       "0",
       userData.levelIncomeEarned || "0",
       "0",
-      userData.performanceBonusEarned || "0",
+      "0",
       parseFloat(userData.boosterRate || "0.5"),
       Number(oneDay || 1800n),
       Number(perfOneDay || 480n),
