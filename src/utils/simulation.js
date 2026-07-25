@@ -719,6 +719,16 @@ export function generateEventsList(
       const depMaxCap = depAmount * 2.2;
       const depCurrentEarned = depositROIEarnedMap[depIdx] || 0;
 
+      const hasAnchoredEvt = generated.some(g => 
+        g.type === "roi" && 
+        g.txHash && g.txHash.includes(`_dep${depIdx}`) &&
+        Math.abs(g.timestamp - evt.timestamp) < 300
+      );
+
+      if (hasAnchoredEvt) {
+        continue;
+      }
+
       if (depCurrentEarned < depMaxCap - 0.0001) {
         // Booster ROI applies ONLY to First Deposit (evt.isFirstDeposit / depIdx === 0)
         const rateBps = evt.isFirstDeposit ? getBoosterRateAtTime(evt.timestamp) : 50;
