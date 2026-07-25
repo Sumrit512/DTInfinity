@@ -641,6 +641,36 @@ export function generateEventsList(
   }
 
   const depositROIEarnedMap = {};
+  const depositTotalEarnedMap = {};
+
+  if (onChainEvents && onChainEvents.length > 0) {
+    onChainEvents.forEach(e => {
+      if (!e.isSimulated && (!e.user || e.user.toLowerCase() === userAddrLower)) {
+        if (["level_income", "level_roi", "perf_claim", "perf_instant", "perf_daily", "roi", "booster_roi"].includes(e.type)) {
+          sortedDeposits.forEach((dep, depIdx) => {
+            if (e.timestamp >= dep.timestamp) {
+              depositTotalEarnedMap[depIdx] = (depositTotalEarnedMap[depIdx] || 0) + e.amount;
+            }
+          });
+        }
+      }
+    });
+  }
+
+  generated.forEach(e => {
+    sortedDeposits.forEach((dep, depIdx) => {
+      if (e.timestamp >= dep.timestamp) {
+        depositTotalEarnedMap[depIdx] = (depositTotalEarnedMap[depIdx] || 0) + e.amount;
+      }
+    });
+    if (e.type === "roi" && e.txHash) {
+      const match = e.txHash.match(/dep(\d+)/);
+      if (match) {
+        const depIdx = Number(match[1]);
+        depositROIEarnedMap[depIdx] = (depositROIEarnedMap[depIdx] || 0) + e.amount;
+      }
+    }
+  });
 
   for (const evt of candidateEvents) {
     if (evt.type === "user_deposit") {
@@ -678,6 +708,11 @@ export function generateEventsList(
         });
         accumulatedLevelIncome += amt;
         cumulativeTotalEarned += amt;
+        sortedDeposits.forEach((dep, depIdx) => {
+          if (evt.timestamp >= dep.timestamp) {
+            depositTotalEarnedMap[depIdx] = (depositTotalEarnedMap[depIdx] || 0) + amt;
+          }
+        });
       }
       continue;
     }
@@ -706,6 +741,11 @@ export function generateEventsList(
         });
         accumulatedLevelROI += amt;
         cumulativeTotalEarned += amt;
+        sortedDeposits.forEach((dep, depIdx) => {
+          if (evt.timestamp >= dep.timestamp) {
+            depositTotalEarnedMap[depIdx] = (depositTotalEarnedMap[depIdx] || 0) + amt;
+          }
+        });
       }
       continue;
     }
@@ -714,7 +754,7 @@ export function generateEventsList(
       const depIdx = evt.depIdx;
       const depAmount = evt.depAmount;
       const depMaxCap = depAmount * 2.2;
-      const depCurrentEarned = depositROIEarnedMap[depIdx] || 0;
+      const depCurrentEarned = depositTotalEarnedMap[depIdx] || 0;
 
       const hasAnchoredEvt = generated.some(g => 
         g.type === "roi" && 
@@ -736,7 +776,7 @@ export function generateEventsList(
           if (!isFutureRoi && targetDailyROI > 0 && accumulatedDailyROI + roiAmt > targetDailyROI) {
             roiAmt = targetDailyROI - accumulatedDailyROI;
           }
-          const curRemDepCap = Math.max(0, depMaxCap - (depositROIEarnedMap[depIdx] || 0));
+          const curRemDepCap = Math.max(0, depMaxCap - depCurrentEarned);
           const curRemRoiCap = Math.max(0, maxRoiCap - cumulativeTotalEarned);
           const curRemNetCap = Math.max(0, maxNetworkCap - cumulativeTotalEarned);
           roiAmt = Math.min(roiAmt, curRemDepCap, curRemRoiCap, curRemNetCap);
@@ -755,6 +795,11 @@ export function generateEventsList(
               blockNumber: 0
             });
             depositROIEarnedMap[depIdx] = (depositROIEarnedMap[depIdx] || 0) + roiAmt;
+            sortedDeposits.forEach((dep, dIdx) => {
+              if (evt.timestamp >= dep.timestamp) {
+                depositTotalEarnedMap[dIdx] = (depositTotalEarnedMap[dIdx] || 0) + roiAmt;
+              }
+            });
             accumulatedDailyROI += roiAmt;
             cumulativeTotalEarned += roiAmt;
           }
