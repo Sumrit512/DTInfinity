@@ -38,7 +38,14 @@ export default function DashboardView({
   const maxNetCap = userDepNum * 4.0;
   const isUserCapped = userDepNum > 0 && parseFloat(totalEarnedAcrossStreams || "0") >= maxNetCap - 0.001;
 
-  const validQualifications = isUserCapped ? [] : (pendingQualifications || []).filter(qual => !qual.isCappedAtStart);
+  const validQualifications = isUserCapped
+    ? []
+    : (pendingQualifications || []).filter(qual => {
+        if (qual.isCappedAtStart) return false;
+        const endClaimTime = Number(qual.claimTime) + Number(perfOneDay || 86400n);
+        const isExpired = nowUnix >= endClaimTime;
+        return !isExpired;
+      });
 
   return (
     <div className="view active">

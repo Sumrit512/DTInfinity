@@ -25,6 +25,27 @@ export function generateEventsList(
   const ONE_DAY_SECS = Number(oneDayVal) || 1800;
   const PERF_ONE_DAY_SECS = Number(perfOneDayVal) || 480;
   const now = Math.floor(Date.now() / 1000);
+  const userAddrLower = addr ? addr.toLowerCase() : "";
+
+  const localActiveBonuses = [...(activeBonuses || [])];
+  if (onChainEvents && onChainEvents.length > 0) {
+    onChainEvents.forEach(e => {
+      if ((e.type === "perf_claim" || e.type === "perf_claim_option2" || e.type === "perf_instant") && e.tierIndex !== undefined && (!e.user || e.user.toLowerCase() === userAddrLower)) {
+        const tier = Number(e.tierIndex);
+        const rate = PERFORMANCE_TIERS[tier]?.daily || 5;
+        const exists = localActiveBonuses.some(b => b.tierIndex === tier);
+        if (!exists) {
+          localActiveBonuses.push({
+            tierIndex: tier,
+            dailyRate: rate,
+            startTime: e.timestamp,
+            endTime: e.timestamp + 30 * PERF_ONE_DAY_SECS,
+            lastClaimTime: e.timestamp
+          });
+        }
+      }
+    });
+  }
 
   // 1. Prepare user deposits timeline (sorted ascending)
   let sortedDeposits = [];
@@ -334,9 +355,9 @@ export function generateEventsList(
     }
   });
 
-  if (activeBonuses && activeBonuses.length > 0) {
+  if (localActiveBonuses && localActiveBonuses.length > 0) {
     const uniqueBonuses = [];
-    activeBonuses.forEach(b => {
+    localActiveBonuses.forEach(b => {
       const isDup = uniqueBonuses.some(ub => 
         (ub.tierIndex !== undefined && ub.tierIndex === b.tierIndex) ||
         Math.abs(ub.startTime - b.startTime) < 300
@@ -476,7 +497,7 @@ export function generateEventsList(
   let lastUpdatePerf = 0;
 
   const generated = [];
-  const userAddrLower = addr ? addr.toLowerCase() : "";
+
 
   if (onChainEvents && onChainEvents.length > 0) {
     onChainEvents.forEach(e => {
@@ -550,8 +571,8 @@ export function generateEventsList(
       .filter(e => e.type === "perf_daily" && !e.isSimulated && (!e.user || e.user.toLowerCase() === userAddrLower))
       .sort((a, b) => a.timestamp - b.timestamp);
 
-    if (activeBonuses && activeBonuses.length > 0) {
-      lastUpdatePerf = Math.max(regTime, activeBonuses[0].startTime);
+    if (localActiveBonuses && localActiveBonuses.length > 0) {
+      lastUpdatePerf = Math.max(regTime, localActiveBonuses[0].startTime);
     } else if (realPerfEvents.length > 0) {
       const firstEvtTime = realPerfEvents[0].timestamp;
       lastUpdatePerf = Math.max(regTime, firstEvtTime - PERF_ONE_DAY_SECS);
@@ -560,7 +581,11 @@ export function generateEventsList(
     }
 
     realPerfEvents.forEach((e, idx) => {
-      const dailyRate = (activeBonuses && activeBonuses.length > 0) ? activeBonuses[0].dailyRate : 5;
+      let dailyRate = 5;
+      if (localActiveBonuses && localActiveBonuses.length > 0) {
+        const match = localActiveBonuses.find(b => b.tierIndex === e.tierIndex) || localActiveBonuses[0];
+        dailyRate = match.dailyRate;
+      }
       const numPayouts = Math.round(e.amount / dailyRate);
       if (numPayouts > 0) {
         const startTimeForChunk = e.timestamp - (numPayouts - 1) * PERF_ONE_DAY_SECS;
@@ -710,6 +735,12 @@ export function generateEventsList(
     }
 
     if (evt.type === "candidate_perf_daily") {
+      const hasAnchoredEvt = generated.some(g => 
+        g.type === "perf_daily" && 
+        Math.abs(g.timestamp - evt.timestamp) < 300
+      );
+      if (hasAnchoredEvt) continue;
+
       if (evt.timestamp > now || evt.timestamp <= lastUpdatePerf) continue;
       if (targetPerf > 0 && accumulatedPerf >= targetPerf - 0.001) continue;
 

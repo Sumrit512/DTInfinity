@@ -1251,6 +1251,24 @@ export default function Dashboard() {
       if (!isDup) list.push(b);
     });
 
+    // Populate active bonuses from on-chain claiming event logs (perf_claim / perf_claim_option2)
+    (dbLedger || []).forEach(e => {
+      if (e.type === "perf_claim" && e.tierIndex !== undefined) {
+        const tier = Number(e.tierIndex);
+        const rate = PERFORMANCE_TIERS[tier]?.daily || 5;
+        const exists = list.some(b => b.tierIndex === tier);
+        if (!exists) {
+          list.push({
+            tierIndex: tier,
+            dailyRate: rate,
+            startTime: e.timestamp,
+            endTime: e.timestamp + 30 * (Number(perfOneDay || 86400n)),
+            lastClaimTime: e.timestamp
+          });
+        }
+      }
+    });
+
     // Identify performance tiers that have already been claimed via Instant Payment Option (perf_instant)
     const instantClaimedTiers = new Set();
     (dbLedger || []).forEach(e => {
@@ -1403,7 +1421,7 @@ export default function Dashboard() {
       "0",
       userData.levelIncomeEarned || "0",
       "0",
-      "0",
+      userData.performanceBonusEarned || "0",
       parseFloat(userData.boosterRate || "0.5"),
       Number(oneDay || 1800n),
       Number(perfOneDay || 480n),
