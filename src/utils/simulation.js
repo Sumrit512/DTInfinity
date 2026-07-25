@@ -557,6 +557,10 @@ export function generateEventsList(
       cumulativeTotalEarned += e.amount;
     });
 
+    const realBoosterEvents = onChainEvents
+      .filter(e => e.type === "booster_roi" && !e.isSimulated && (!e.user || e.user.toLowerCase() === userAddrLower))
+      .sort((a, b) => a.timestamp - b.timestamp);
+
     const depLastUpdateBoosterMap = {};
     sortedDeposits.forEach((d, idx) => {
       depLastUpdateBoosterMap[idx] = d.timestamp;
