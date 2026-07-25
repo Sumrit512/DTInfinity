@@ -159,9 +159,13 @@ export default function Dashboard() {
   const syncOnChainEventsMutation = useMutation(api.events.syncOnChainEvents);
   const syncMissedTxAction = useAction(api.transactions.syncMissedTx);
 
-  const dbLedger = useQuery(api.events.getLedger, walletAddress ? {
+  const targetAddressForLedger = (searchFromUser && searchFromUser.trim().length >= 10)
+    ? searchFromUser.trim().toLowerCase()
+    : walletAddress;
+
+  const dbLedger = useQuery(api.events.getLedger, targetAddressForLedger ? {
     contractAddress: dtInfinityAddress,
-    address: walletAddress,
+    address: targetAddressForLedger,
     currentOneDayVal: Number(oneDay || 86400n),
     currentPerfOneDayVal: Number(perfOneDay || 86400n),
     levelIncomeEarned: parseFloat(userData.levelIncomeEarned || "0"),
@@ -683,20 +687,49 @@ export default function Dashboard() {
         let withdrawals = [];
         try {
           userDeposits = await dtContract.getUserDeposits(addr);
-          if (userDeposits && userDeposits.length > 0) {
-            setLastDepositAmount(formatUSDT(userDeposits[userDeposits.length - 1].amount));
-            deposits = userDeposits.map((d, i) => ({
-              type: "deposit",
-              typeName: "Deposit",
-              fromUser: "Self",
-              amount: parseFloat(ethers.formatUnits(d.amount || 0n, 18)),
-              level: "-",
-              timestamp: Number(d.time || 0n),
-              status: "Completed",
-              txHash: `0x_dep_${addr}_${i}`,
-              blockNumber: 0
-            }));
+          let rawDeposits = (userDeposits || []).map((d, i) => ({
+            type: "deposit",
+            typeName: "Deposit",
+            fromUser: addr,
+            amount: parseFloat(ethers.formatUnits(d.amount || 0n, 18)),
+            level: "-",
+            timestamp: Number(d.time || d.timestamp || 0n),
+            status: "Completed",
+            txHash: `0x_dep_${addr.toLowerCase()}_${i}_${Number(d.time || d.timestamp || 0n)}`,
+            blockNumber: 0
+          })).filter(d => d.amount >= 0.01 && d.timestamp >= 1704067200);
+
+          try {
+            const depositLogs = await dtContract.queryFilter(dtContract.filters.DepositMade(addr));
+            depositLogs.forEach((log) => {
+              const parsed = dtContract.interface.parseLog(log);
+              const amt = parseFloat(ethers.formatUnits(parsed.args.amount || 0n, 18));
+              const time = Number(parsed.args.timestamp || 0n);
+              if (amt >= 0.01 && time >= 1704067200) {
+                const exists = rawDeposits.some(d => Math.abs(d.timestamp - time) < 60 && Math.abs(d.amount - amt) < 0.01);
+                if (!exists) {
+                  rawDeposits.push({
+                    type: "deposit",
+                    typeName: "Deposit",
+                    fromUser: addr,
+                    amount: amt,
+                    level: "-",
+                    timestamp: time,
+                    status: "Completed",
+                    txHash: log.transactionHash,
+                    actualTxHash: log.transactionHash,
+                    blockNumber: log.blockNumber || 0
+                  });
+                }
+              }
+            });
+          } catch (logErr) {}
+
+          rawDeposits.sort((a, b) => a.timestamp - b.timestamp);
+          if (rawDeposits.length > 0) {
+            setLastDepositAmount(rawDeposits[rawDeposits.length - 1].amount.toString());
           }
+          deposits = rawDeposits;
 
           userWithdrawals = await dtContract.getUserWithdrawals(addr);
           withdrawals = userWithdrawals.map((w, i) => ({
@@ -1338,8 +1371,9 @@ export default function Dashboard() {
   }, [activeBonuses, pendingQualifications, perfOneDay, userData.totalDeposits, userData.registrationTime, userData.totalTeamVolume, lifetimeTeamVolume, secondsSinceSync, dbLedger]);
 
   const unmergedTxs = useMemo(() => {
-    if (!walletConnected || !isRegistered) return [];
     const ledger = dbLedger || [];
+    const activeAddress = targetAddressForLedger || walletAddress;
+    if (!activeAddress && ledger.length === 0) return [];
     const realDeposits = ledger.filter(e => e.type === "deposit");
     const realWithdrawals = ledger.filter(e => e.type === "withdraw");
     // Exclude bulk on-chain ROI events and bulk on-chain performance daily events to display every payout independently
@@ -1362,7 +1396,7 @@ export default function Dashboard() {
 
     // Dynamically generate simulated candidate events based on live ticking time (every interval separately)
     const simulatedEvents = generateEventsList(
-      walletAddress,
+      targetAddressForLedger || walletAddress,
       Number(userData.registrationTime || 0),
       userData.totalDeposits || "0",
       "0",
