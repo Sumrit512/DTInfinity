@@ -1361,28 +1361,29 @@ export default function Dashboard() {
     const totalVol = Math.max(parseFloat(userData.totalTeamVolume || "0"), calculatedTotalVol, lifetimeTeamVolume || 0);
     const otherLegs = Math.max(0, totalVol - strongLeg);
 
-    if (userDepNum >= 50 && regTimeNum > 0) {
+    if (userDepNum >= 50 && regTimeNum > 0 && list.length === 0) {
+      let highestQualifiedIdx = -1;
       PERFORMANCE_TIERS.forEach((tier, tIdx) => {
         if (!instantClaimedTiers.has(tIdx)) {
           if (strongLeg >= tier.target && otherLegs >= tier.target) {
-            const exists = list.some(b => 
-              (b.tierIndex !== undefined && b.tierIndex === tIdx)
-            );
-            if (!exists) {
-              const qualClaimTime = (pendingQualifications && pendingQualifications.length > 0 && Number(pendingQualifications[0].claimTime) > 0) 
-                ? Number(pendingQualifications[0].claimTime) 
-                : 1784773800;
-              list.push({
-                tierIndex: tIdx,
-                dailyRate: tier.daily,
-                startTime: qualClaimTime,
-                endTime: qualClaimTime + 30 * Number(perfOneDay || 60n),
-                lastClaimTime: qualClaimTime
-              });
-            }
+            highestQualifiedIdx = tIdx;
           }
         }
       });
+
+      if (highestQualifiedIdx >= 0) {
+        const tier = PERFORMANCE_TIERS[highestQualifiedIdx];
+        const qualClaimTime = (pendingQualifications && pendingQualifications.length > 0 && Number(pendingQualifications[0].claimTime) > 0) 
+          ? Number(pendingQualifications[0].claimTime) 
+          : 1784773800;
+        list.push({
+          tierIndex: highestQualifiedIdx,
+          dailyRate: tier.daily,
+          startTime: qualClaimTime,
+          endTime: qualClaimTime + 30 * Number(perfOneDay || 60n),
+          lastClaimTime: qualClaimTime
+        });
+      }
     }
 
     return list;

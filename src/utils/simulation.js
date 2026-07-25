@@ -365,27 +365,39 @@ export function generateEventsList(
       if (!isDup) uniqueBonuses.push(b);
     });
 
+    let realPerfSumOnChain = 0;
+    if (onChainEvents && onChainEvents.length > 0) {
+      onChainEvents.forEach(e => {
+        if (e.type === "perf_daily" && !e.isSimulated && (!e.user || e.user.toLowerCase() === userAddrLower)) {
+          realPerfSumOnChain += e.amount;
+        }
+      });
+    }
+
+    let totalMaxAllowedPerf = 0;
+    uniqueBonuses.forEach(b => {
+      totalMaxAllowedPerf += 30 * b.dailyRate;
+    });
+
+    let remainingPerfAmount = Math.max(0, totalMaxAllowedPerf - realPerfSumOnChain);
+    let simulatedCandidatePerfSum = 0;
+
     uniqueBonuses.forEach((bonus, bIdx) => {
-      let anchoredCount = 0;
-      if (onChainEvents && onChainEvents.length > 0) {
-        onChainEvents.forEach(e => {
-          if (e.type === "perf_daily" && !e.isSimulated && (!e.user || e.user.toLowerCase() === userAddrLower)) {
-            if (e.tierIndex === bonus.tierIndex || Math.abs(e.timestamp - bonus.startTime) < 300) {
-              anchoredCount += Math.round(e.amount / bonus.dailyRate);
-            }
-          }
-        });
-      }
-      if (anchoredCount >= 30) {
+      if (simulatedCandidatePerfSum >= remainingPerfAmount - 0.01) {
         return;
       }
 
       const streamStart = bonus.startTime;
       const streamEnd = bonus.endTime > 0 ? bonus.endTime : streamStart + 30 * PERF_ONE_DAY_SECS;
-      let day = anchoredCount + 1;
+
+      let day = 1;
       while (true) {
         const salaryTime = streamStart + day * PERF_ONE_DAY_SECS;
         if (salaryTime > streamEnd || salaryTime > now || day > 30) break;
+
+        if (simulatedCandidatePerfSum + bonus.dailyRate > remainingPerfAmount + 0.01) {
+          break;
+        }
 
         candidateEvents.push({
           type: "candidate_perf_daily",
@@ -398,6 +410,8 @@ export function generateEventsList(
           timestamp: salaryTime,
           sortPriority: 4
         });
+
+        simulatedCandidatePerfSum += bonus.dailyRate;
         day++;
       }
     });
