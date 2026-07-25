@@ -1413,26 +1413,7 @@ export default function Dashboard() {
   }, [dbLedger, walletConnected, isRegistered, sortOrder, userData, oneDay, perfOneDay, treeNodes, effectiveActiveBonuses, secondsSinceSync, walletAddress]);
 
   const txs = useMemo(() => {
-    const mergedList = [];
-    const roiByTimestamp = {};
-
-    for (const item of unmergedTxs) {
-      if (item.type === "roi" || item.type === "booster_roi") {
-        if (!roiByTimestamp[item.timestamp]) {
-          roiByTimestamp[item.timestamp] = {
-            ...item,
-            type: "roi",
-            typeName: "Daily ROI Payout",
-            amount: 0,
-          };
-          mergedList.push(roiByTimestamp[item.timestamp]);
-        }
-        roiByTimestamp[item.timestamp].amount += item.amount;
-      } else {
-        mergedList.push(item);
-      }
-    }
-    return mergedList;
+    return unmergedTxs;
   }, [unmergedTxs]);
 
   const statsToDisplay = useMemo(() => {
