@@ -702,9 +702,10 @@ export function generateEventsList(
         // Booster ROI applies ONLY to First Deposit (evt.isFirstDeposit / depIdx === 0)
         const rateBps = evt.isFirstDeposit ? getBoosterRateAtTime(evt.timestamp) : 50;
 
-        if (evt.timestamp > lastUpdateROI && (targetDailyROI === 0 || accumulatedDailyROI < targetDailyROI - 0.0001)) {
+        const isFutureRoi = evt.timestamp > lastUpdateROI;
+        if (isFutureRoi || targetDailyROI === 0 || accumulatedDailyROI < targetDailyROI - 0.0001) {
           let roiAmt = (depAmount * rateBps) / 10000;
-          if (targetDailyROI > 0 && accumulatedDailyROI + roiAmt > targetDailyROI) {
+          if (!isFutureRoi && targetDailyROI > 0 && accumulatedDailyROI + roiAmt > targetDailyROI) {
             roiAmt = targetDailyROI - accumulatedDailyROI;
           }
           const curRemDepCap = Math.max(0, depMaxCap - (depositROIEarnedMap[depIdx] || 0));
