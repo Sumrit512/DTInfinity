@@ -498,32 +498,46 @@ export function generateEventsList(
       .filter(e => e.type === "roi" && !e.isSimulated && (!e.user || e.user.toLowerCase() === userAddrLower))
       .sort((a, b) => a.timestamp - b.timestamp);
 
-    realRoiEvents.forEach((e, idx) => {
-      const timeDiff = e.timestamp - lastUpdateROI;
-      const numDays = Math.floor(timeDiff / ONE_DAY_SECS);
-      if (numDays > 0) {
-        const amtPerDay = e.amount / numDays;
-        for (let i = 1; i <= numDays; i++) {
-          const payoutTime = lastUpdateROI + i * ONE_DAY_SECS;
-          const activeDeps = sortedDeposits.filter(d => d.timestamp <= payoutTime);
-          const totalActiveVol = activeDeps.reduce((sum, d) => sum + d.amount, 0);
+    const depLastUpdateRoiMap = {};
+    sortedDeposits.forEach((d, idx) => {
+      depLastUpdateRoiMap[idx] = d.timestamp;
+    });
 
-          if (activeDeps.length > 0 && totalActiveVol > 0) {
-            activeDeps.forEach((dep, depIdx) => {
-              const depShare = (amtPerDay * dep.amount) / totalActiveVol;
+    realRoiEvents.forEach((e, idx) => {
+      const activeDeps = sortedDeposits.filter(d => d.timestamp <= e.timestamp);
+      const totalActiveVol = activeDeps.reduce((sum, d) => sum + d.amount, 0);
+
+      if (activeDeps.length > 0 && totalActiveVol > 0) {
+        activeDeps.forEach((dep, depIdx) => {
+          const lastTime = depLastUpdateRoiMap[depIdx] || dep.timestamp;
+          const timeDiff = e.timestamp - lastTime;
+          const numDays = Math.floor(timeDiff / ONE_DAY_SECS);
+          if (numDays > 0) {
+            const amtPerDayForDep = ((e.amount * dep.amount) / totalActiveVol) / numDays;
+            for (let i = 1; i <= numDays; i++) {
+              const payoutTime = lastTime + i * ONE_DAY_SECS;
               generated.push({
                 type: "roi",
                 typeName: "Daily ROI Payout",
                 fromUser: "Contract",
-                amount: Math.round(depShare * 1e8) / 1e8,
+                amount: Math.round(amtPerDayForDep * 1e8) / 1e8,
                 level: "-",
                 timestamp: payoutTime,
                 status: "Completed",
                 txHash: `0x_gen_roi_${regTime}_anchored_${idx}_${i}_dep${depIdx}`,
                 blockNumber: 0
               });
-            });
-          } else {
+            }
+            depLastUpdateRoiMap[depIdx] = lastTime + numDays * ONE_DAY_SECS;
+          }
+        });
+      } else {
+        const timeDiff = e.timestamp - lastUpdateROI;
+        const numDays = Math.floor(timeDiff / ONE_DAY_SECS);
+        if (numDays > 0) {
+          const amtPerDay = e.amount / numDays;
+          for (let i = 1; i <= numDays; i++) {
+            const payoutTime = lastUpdateROI + i * ONE_DAY_SECS;
             generated.push({
               type: "roi",
               typeName: "Daily ROI Payout",
@@ -536,43 +550,53 @@ export function generateEventsList(
               blockNumber: 0
             });
           }
+          lastUpdateROI += numDays * ONE_DAY_SECS;
         }
-        accumulatedDailyROI += e.amount;
-        cumulativeTotalEarned += e.amount;
-        lastUpdateROI += numDays * ONE_DAY_SECS;
       }
+      accumulatedDailyROI += e.amount;
+      cumulativeTotalEarned += e.amount;
     });
 
-    const realBoosterEvents = onChainEvents
-      .filter(e => e.type === "booster_roi" && !e.isSimulated && (!e.user || e.user.toLowerCase() === userAddrLower))
-      .sort((a, b) => a.timestamp - b.timestamp);
+    const depLastUpdateBoosterMap = {};
+    sortedDeposits.forEach((d, idx) => {
+      depLastUpdateBoosterMap[idx] = d.timestamp;
+    });
 
     realBoosterEvents.forEach((e, idx) => {
-      const timeDiff = e.timestamp - lastUpdateBooster;
-      const numDays = Math.floor(timeDiff / ONE_DAY_SECS);
-      if (numDays > 0) {
-        const amtPerDay = e.amount / numDays;
-        for (let i = 1; i <= numDays; i++) {
-          const payoutTime = lastUpdateBooster + i * ONE_DAY_SECS;
-          const activeDeps = sortedDeposits.filter(d => d.timestamp <= payoutTime);
-          const totalActiveVol = activeDeps.reduce((sum, d) => sum + d.amount, 0);
+      const activeDeps = sortedDeposits.filter(d => d.timestamp <= e.timestamp);
+      const totalActiveVol = activeDeps.reduce((sum, d) => sum + d.amount, 0);
 
-          if (activeDeps.length > 0 && totalActiveVol > 0) {
-            activeDeps.forEach((dep, depIdx) => {
-              const depShare = (amtPerDay * dep.amount) / totalActiveVol;
+      if (activeDeps.length > 0 && totalActiveVol > 0) {
+        activeDeps.forEach((dep, depIdx) => {
+          const lastTime = depLastUpdateBoosterMap[depIdx] || dep.timestamp;
+          const timeDiff = e.timestamp - lastTime;
+          const numDays = Math.floor(timeDiff / ONE_DAY_SECS);
+          if (numDays > 0) {
+            const amtPerDayForDep = ((e.amount * dep.amount) / totalActiveVol) / numDays;
+            for (let i = 1; i <= numDays; i++) {
+              const payoutTime = lastTime + i * ONE_DAY_SECS;
               generated.push({
                 type: "booster_roi",
                 typeName: "Booster ROI Payout",
                 fromUser: "Contract",
-                amount: Math.round(depShare * 1e8) / 1e8,
+                amount: Math.round(amtPerDayForDep * 1e8) / 1e8,
                 level: "-",
                 timestamp: payoutTime,
                 status: "Completed",
                 txHash: `0x_gen_booster_${regTime}_anchored_${idx}_${i}_dep${depIdx}`,
                 blockNumber: 0
               });
-            });
-          } else {
+            }
+            depLastUpdateBoosterMap[depIdx] = lastTime + numDays * ONE_DAY_SECS;
+          }
+        });
+      } else {
+        const timeDiff = e.timestamp - lastUpdateBooster;
+        const numDays = Math.floor(timeDiff / ONE_DAY_SECS);
+        if (numDays > 0) {
+          const amtPerDay = e.amount / numDays;
+          for (let i = 1; i <= numDays; i++) {
+            const payoutTime = lastUpdateBooster + i * ONE_DAY_SECS;
             generated.push({
               type: "booster_roi",
               typeName: "Booster ROI Payout",
@@ -585,11 +609,11 @@ export function generateEventsList(
               blockNumber: 0
             });
           }
+          lastUpdateBooster += numDays * ONE_DAY_SECS;
         }
-        accumulatedBoosterROI += e.amount;
-        cumulativeTotalEarned += e.amount;
-        lastUpdateBooster += numDays * ONE_DAY_SECS;
       }
+      accumulatedBoosterROI += e.amount;
+      cumulativeTotalEarned += e.amount;
     });
 
     const realPerfEvents = onChainEvents
