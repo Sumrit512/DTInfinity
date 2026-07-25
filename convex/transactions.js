@@ -24,9 +24,9 @@ export const syncDeposits = mutation({
       )
       .collect();
 
-    // Clean up any corrupt/malformed deposits for this user (amount < 0.01 or time > 2000000000)
+    // Clean up any corrupt/malformed deposits for this user (amount < 0.01 or time < 1704067200 or time > 2000000000)
     for (const doc of existingUserDeposits) {
-      if (doc.amount < 0.01 || doc.time > 2000000000 || doc.time === 0) {
+      if (doc.amount < 0.01 || doc.time > 2000000000 || doc.time < 1704067200 || doc.time === 0) {
         await ctx.db.delete(doc._id);
       }
     }
@@ -41,20 +41,29 @@ export const syncDeposits = mutation({
 
     const missingDeposits = [];
 
-    for (const dep of args.deposits) {
-      if (dep.amount < 0.01 || dep.time > 2000000000 || dep.time === 0) continue;
+    for (let i = 0; i < args.deposits.length; i++) {
+      const dep = args.deposits[i];
+      if (dep.amount < 0.01 || dep.time > 2000000000 || dep.time < 1704067200 || dep.time === 0) continue;
       const txHashLower = dep.txHash.toLowerCase();
       const actualHashLower = dep.actualTxHash ? dep.actualTxHash.toLowerCase() : undefined;
+      const indexPrefix = `0x_dep_${userLower}_${i}_`;
 
       const existing = cleanUserDeposits.find(e => 
         e.txHash.toLowerCase() === txHashLower ||
+        e.txHash.toLowerCase().startsWith(indexPrefix) ||
         (actualHashLower && e.actualTxHash && e.actualTxHash.toLowerCase() === actualHashLower) ||
         (Math.abs(e.time - dep.time) < 10 && Math.abs(e.amount - dep.amount) < 0.01)
       );
 
       if (existing) {
-        if (actualHashLower && !existing.actualTxHash) {
-          await ctx.db.patch(existing._id, { actualTxHash: actualHashLower });
+        const patchData = {};
+        if (Math.abs(existing.amount - dep.amount) >= 0.01) patchData.amount = dep.amount;
+        if (existing.time !== dep.time) patchData.time = dep.time;
+        if (existing.txHash.toLowerCase() !== txHashLower) patchData.txHash = txHashLower;
+        if (actualHashLower && existing.actualTxHash !== actualHashLower) patchData.actualTxHash = actualHashLower;
+
+        if (Object.keys(patchData).length > 0) {
+          await ctx.db.patch(existing._id, patchData);
         }
       } else {
         missingDeposits.push({
@@ -72,6 +81,31 @@ export const syncDeposits = mutation({
 
     for (const depDoc of missingDeposits) {
       await ctx.db.insert("deposits", depDoc);
+    }
+
+    // Deduplicate existing deposits table for this user by amount + time
+    const seenDepositsKey = new Set();
+    const finalCleanDeposits = await ctx.db
+      .query("deposits")
+      .withIndex("by_contract_address_user", (q) =>
+        q.eq("contractAddress", contractLower).eq("user", userLower)
+      )
+      .collect();
+
+    // Sort so entries with actualTxHash come first
+    finalCleanDeposits.sort((a, b) => (b.actualTxHash ? 1 : 0) - (a.actualTxHash ? 1 : 0));
+
+    for (const doc of finalCleanDeposits) {
+      if (doc.amount < 0.01 || doc.time > 2000000000 || doc.time < 1704067200 || doc.time === 0) {
+        await ctx.db.delete(doc._id);
+        continue;
+      }
+      const dedupKey = `${doc.amount}_${doc.time}`;
+      if (seenDepositsKey.has(dedupKey)) {
+        await ctx.db.delete(doc._id);
+      } else {
+        seenDepositsKey.add(dedupKey);
+      }
     }
   },
 });
