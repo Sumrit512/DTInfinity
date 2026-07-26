@@ -397,7 +397,7 @@ export function generateEventsList(
       totalMaxAllowedPerf += 30 * b.dailyRate;
     });
 
-    let remainingPerfAmount = Math.max(0, totalMaxAllowedPerf - realPerfSumOnChain);
+    let remainingPerfAmount = totalMaxAllowedPerf;
     let simulatedCandidatePerfSum = 0;
 
     uniqueBonuses.forEach((bonus, bIdx) => {
