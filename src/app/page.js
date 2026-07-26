@@ -1242,8 +1242,25 @@ export default function Dashboard() {
   }, [dbTreeNodes, walletAddress, walletConnected, isRegistered]);
 
   const effectiveActiveBonuses = useMemo(() => {
+    // Identify performance tiers that have already been claimed via Instant Payment Option (perf_instant)
+    const instantClaimedTiers = new Set();
+    (dbLedger || []).forEach(e => {
+      if (e.type === "perf_instant") {
+        if (e.tierIndex !== undefined && e.tierIndex !== null) {
+          instantClaimedTiers.add(Number(e.tierIndex));
+        } else {
+          PERFORMANCE_TIERS.forEach((t, idx) => {
+            if (Math.abs((parseFloat(e.amount) || 0) - t.instant) < 0.01) {
+              instantClaimedTiers.add(idx);
+            }
+          });
+        }
+      }
+    });
+
     const list = [];
     (activeBonuses || []).forEach(b => {
+      if (b.tierIndex !== undefined && instantClaimedTiers.has(Number(b.tierIndex))) return;
       const isDup = list.some(existing => 
         (existing.tierIndex !== undefined && existing.tierIndex === b.tierIndex) ||
         Math.abs(existing.startTime - b.startTime) < 300
@@ -1255,6 +1272,7 @@ export default function Dashboard() {
     (dbLedger || []).forEach(e => {
       if (e.type === "perf_claim" && e.tierIndex !== undefined) {
         const tier = Number(e.tierIndex);
+        if (instantClaimedTiers.has(tier)) return;
         const rate = PERFORMANCE_TIERS[tier]?.daily || 5;
         const exists = list.some(b => b.tierIndex === tier);
         if (!exists) {
@@ -1264,22 +1282,6 @@ export default function Dashboard() {
             startTime: e.timestamp,
             endTime: e.timestamp + 30 * (Number(perfOneDay || 86400n)),
             lastClaimTime: e.timestamp
-          });
-        }
-      }
-    });
-
-    // Identify performance tiers that have already been claimed via Instant Payment Option (perf_instant)
-    const instantClaimedTiers = new Set();
-    (dbLedger || []).forEach(e => {
-      if (e.type === "perf_instant") {
-        if (e.tierIndex !== undefined) {
-          instantClaimedTiers.add(e.tierIndex);
-        } else {
-          PERFORMANCE_TIERS.forEach((t, idx) => {
-            if (Math.abs((parseFloat(e.amount) || 0) - t.instant) < 0.01) {
-              instantClaimedTiers.add(idx);
-            }
           });
         }
       }
@@ -1371,7 +1373,7 @@ export default function Dashboard() {
         }
       });
 
-      if (highestQualifiedIdx >= 0) {
+      if (highestQualifiedIdx >= 0 && !instantClaimedTiers.has(highestQualifiedIdx)) {
         const tier = PERFORMANCE_TIERS[highestQualifiedIdx];
         const qualClaimTime = (pendingQualifications && pendingQualifications.length > 0 && Number(pendingQualifications[0].claimTime) > 0) 
           ? Number(pendingQualifications[0].claimTime) 
@@ -1386,7 +1388,7 @@ export default function Dashboard() {
       }
     }
 
-    return list;
+    return list.filter(b => b.tierIndex === undefined || !instantClaimedTiers.has(Number(b.tierIndex)));
   }, [activeBonuses, pendingQualifications, perfOneDay, userData.totalDeposits, userData.registrationTime, userData.totalTeamVolume, lifetimeTeamVolume, secondsSinceSync, dbLedger]);
 
   const unmergedTxs = useMemo(() => {
@@ -1490,19 +1492,19 @@ export default function Dashboard() {
       }
     });
 
-    if (dailyROI === 0 && parseFloat(userData.dailyROIEarned || "0") > 0 && (!walletConnected || !isRegistered)) {
+    if (parseFloat(userData.dailyROIEarned || "0") > dailyROI) {
       dailyROI = parseFloat(userData.dailyROIEarned || "0");
     }
-    if (boosterROI === 0 && parseFloat(userData.roiBoosterEarned || "0") > 0 && (!walletConnected || !isRegistered)) {
+    if (parseFloat(userData.roiBoosterEarned || "0") > boosterROI) {
       boosterROI = parseFloat(userData.roiBoosterEarned || "0");
     }
-    if (levelIncome === 0 && parseFloat(userData.levelIncomeEarned || "0") > 0 && (!walletConnected || !isRegistered)) {
+    if (parseFloat(userData.levelIncomeEarned || "0") > levelIncome) {
       levelIncome = parseFloat(userData.levelIncomeEarned || "0");
     }
-    if (levelROI === 0 && parseFloat(userData.levelROIEarned || "0") > 0 && (!walletConnected || !isRegistered)) {
+    if (parseFloat(userData.levelROIEarned || "0") > levelROI) {
       levelROI = parseFloat(userData.levelROIEarned || "0");
     }
-    if (performance === 0 && (!effectiveActiveBonuses || effectiveActiveBonuses.length === 0)) {
+    if (parseFloat(userData.performanceBonusEarned || "0") > performance) {
       performance = parseFloat(userData.performanceBonusEarned || "0");
     }
 

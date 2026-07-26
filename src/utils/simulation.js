@@ -356,8 +356,26 @@ export function generateEventsList(
   });
 
   if (localActiveBonuses && localActiveBonuses.length > 0) {
+    const instantClaimedTiers = new Set();
+    if (onChainEvents && onChainEvents.length > 0) {
+      onChainEvents.forEach(e => {
+        if (e.type === "perf_instant" && (!e.user || e.user.toLowerCase() === userAddrLower)) {
+          if (e.tierIndex !== undefined && e.tierIndex !== null) {
+            instantClaimedTiers.add(Number(e.tierIndex));
+          } else {
+            PERFORMANCE_TIERS.forEach((t, idx) => {
+              if (Math.abs((parseFloat(e.amount) || 0) - t.instant) < 0.01) {
+                instantClaimedTiers.add(idx);
+              }
+            });
+          }
+        }
+      });
+    }
+
     const uniqueBonuses = [];
     localActiveBonuses.forEach(b => {
+      if (b.tierIndex !== undefined && instantClaimedTiers.has(Number(b.tierIndex))) return;
       const isDup = uniqueBonuses.some(ub => 
         (ub.tierIndex !== undefined && ub.tierIndex === b.tierIndex) ||
         Math.abs(ub.startTime - b.startTime) < 300
@@ -383,6 +401,9 @@ export function generateEventsList(
     let simulatedCandidatePerfSum = 0;
 
     uniqueBonuses.forEach((bonus, bIdx) => {
+      if (bonus.tierIndex !== undefined && instantClaimedTiers.has(Number(bonus.tierIndex))) {
+        return;
+      }
       if (simulatedCandidatePerfSum >= remainingPerfAmount - 0.01) {
         return;
       }
@@ -642,6 +663,18 @@ export function generateEventsList(
 
   const depositROIEarnedMap = {};
   const depositTotalEarnedMap = {};
+
+  // Pre-seed depositTotalEarnedMap with target network income for Deposit 0 (earned before Deposit 1)
+  sortedDeposits.forEach((dep, depIdx) => {
+    if (depIdx === 0) {
+      let preSeed = 0;
+      if (targetLevelIncome > 0) preSeed += targetLevelIncome;
+      if (targetLevelROI > 0) preSeed += targetLevelROI;
+      if (preSeed > 0) {
+        depositTotalEarnedMap[depIdx] = (depositTotalEarnedMap[depIdx] || 0) + preSeed;
+      }
+    }
+  });
 
   if (onChainEvents && onChainEvents.length > 0) {
     onChainEvents.forEach(e => {

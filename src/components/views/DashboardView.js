@@ -36,7 +36,19 @@ export default function DashboardView({
 
   const userDepNum = parseFloat(userData?.totalDeposits || "0");
   const maxNetCap = userDepNum * 4.0;
-  const isUserCapped = userDepNum > 0 && parseFloat(totalEarnedAcrossStreams || "0") >= maxNetCap - 0.001;
+  const currentEarnedFromUserData = 
+    parseFloat(userData?.dailyROIEarned || "0") +
+    parseFloat(userData?.roiBoosterEarned || "0") +
+    parseFloat(userData?.levelIncomeEarned || "0") +
+    parseFloat(userData?.levelROIEarned || "0") +
+    parseFloat(userData?.performanceBonusEarned || "0");
+
+  const totalEarnedForCapping = Math.max(
+    parseFloat(totalEarnedAcrossStreams || "0"),
+    currentEarnedFromUserData
+  );
+
+  const isUserCapped = userDepNum > 0 && totalEarnedForCapping >= maxNetCap - 0.001;
 
   const validQualifications = isUserCapped
     ? []
