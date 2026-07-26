@@ -912,7 +912,24 @@ export default function Dashboard() {
           const blockNumber = receipt.blockNumber || 0;
           const logIndex = log.index !== undefined ? log.index : i;
 
-          if (parsed.name === "LevelIncomePaid") {
+          if (parsed.name === "DepositMade") {
+            const depAmt = parseFloat(ethers.formatUnits(parsed.args.amount || 0n, 18));
+            const depTime = Number(parsed.args.timestamp || parsed.args.time || Math.floor(Date.now() / 1000));
+            if (depAmt >= 0.01) {
+              try {
+                await syncDepositsMutation({
+                  contractAddress: dtInfinityAddress,
+                  user: parsed.args.user.toLowerCase(),
+                  deposits: [{
+                    amount: depAmt,
+                    time: depTime,
+                    txHash: `0x_dep_${parsed.args.user.toLowerCase()}_${depTime}`,
+                    actualTxHash: txHash
+                  }]
+                });
+              } catch (_) {}
+            }
+          } else if (parsed.name === "LevelIncomePaid") {
             eventsToSave.push({
               user: parsed.args.upline.toLowerCase(),
               type: "level_income",
@@ -1093,6 +1110,21 @@ export default function Dashboard() {
         time: Math.floor(Date.now() / 1000)
       };
       setLatestTxDetails(txDetailsObj);
+
+      try {
+        await syncDepositsMutation({
+          contractAddress: dtInfinityAddress,
+          user: walletAddress,
+          deposits: [{
+            amount: val,
+            time: txDetailsObj.time,
+            txHash: `0x_dep_${walletAddress.toLowerCase()}_${txDetailsObj.time}`,
+            actualTxHash: receipt.hash.toLowerCase()
+          }]
+        });
+      } catch (depSyncErr) {
+        console.warn("Direct deposit sync in handleDeposit failed:", depSyncErr);
+      }
 
       await parseAndSaveReceiptLogs(receipt, walletAddress);
 

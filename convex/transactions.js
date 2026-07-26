@@ -196,6 +196,7 @@ export const syncMissedTx = action({
       }
 
       const iface = new ethers.Interface([
+        "event DepositMade(address indexed user, uint256 amount, uint256 timestamp)",
         "event Deposited(address indexed user, uint256 amount, uint256 time)",
         "event Withdrawn(address indexed user, uint256 amount, uint256 time)",
         "event PerformanceBonusClaimed(address indexed user, uint256 tierIndex, bool chooseInstant, uint256 time)"
@@ -212,11 +213,11 @@ export const syncMissedTx = action({
         try {
           const parsed = iface.parseLog(log);
           if (parsed) {
-            if (parsed.name === "Deposited") {
+            if (parsed.name === "DepositMade" || parsed.name === "Deposited") {
               type = "deposit";
               user = parsed.args.user.toLowerCase();
               amount = parseFloat(ethers.formatUnits(parsed.args.amount, 18));
-              time = Number(parsed.args.time);
+              time = Number(parsed.args.timestamp || parsed.args.time || Math.floor(Date.now() / 1000));
               break;
             } else if (parsed.name === "Withdrawn") {
               type = "withdraw";
