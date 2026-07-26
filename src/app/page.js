@@ -1541,9 +1541,21 @@ export default function Dashboard() {
     }
 
     const totalEarned = Math.min(dailyROI + boosterROI + levelIncome + levelROI + performance, maxNetworkCap);
-    const totalWithdrawnNum = parseFloat(userData.totalWithdrawn || "0");
-    // Level Income & Instant Performance Bonus are transferred directly to wallet on deposit/claim, so only contract-accumulated yields (ROI, Level ROI, Perf Daily stream) remain claimable in contract
-    const claimableInContract = Math.max(0, Math.min(dailyROI + boosterROI + levelROI + perfDailyInContract, maxNetworkCap) - totalWithdrawnNum);
+    let elapsedContractYield = 0;
+    const currentNowSecs = Math.floor(Date.now() / 1000);
+    unmergedTxs.forEach(tx => {
+      if (tx.timestamp <= currentNowSecs) {
+        if (tx.type === "roi" || tx.type === "booster_roi" || tx.type === "level_roi") {
+          elapsedContractYield += tx.amount;
+        } else if (tx.type === "perf_daily" || tx.type === "perf_claim") {
+          elapsedContractYield += tx.amount;
+        }
+      }
+    });
+
+    const storedContractClaimable = parseFloat(userData.claimableBalance || "0") + displayPendingDaily + displayPendingBooster + displayPendingPerf;
+    const bestElapsedClaimable = Math.max(elapsedContractYield, storedContractClaimable);
+    const claimableInContract = Math.max(0, Math.min(bestElapsedClaimable, maxNetworkCap) - totalWithdrawnNum);
 
     return {
       dailyROI: dailyROI.toFixed(2),
@@ -1599,7 +1611,7 @@ export default function Dashboard() {
       if (filterType !== "all") {
         if (filterType === "deposit" && tx.type !== "deposit") return false;
         if (filterType === "withdraw" && tx.type !== "withdraw") return false;
-        if (filterType === "roi" && tx.type !== "roi") return false;
+        if (filterType === "roi" && tx.type !== "roi" && tx.type !== "booster_roi") return false;
         if (filterType === "booster_roi" && tx.type !== "booster_roi") return false;
         if (filterType === "level_income" && tx.type !== "level_income") return false;
         if (filterType === "level_roi" && tx.type !== "level_roi") return false;
