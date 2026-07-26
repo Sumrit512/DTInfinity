@@ -546,7 +546,20 @@ export function generateEventsList(
   let lastUpdatePerf = 0;
 
   const generated = [];
+  const depositROIEarnedMap = {};
+  const depositTotalEarnedMap = {};
 
+  // Pre-seed depositTotalEarnedMap with target network income for Deposit 0 (earned before Deposit 1)
+  sortedDeposits.forEach((dep, depIdx) => {
+    if (depIdx === 0) {
+      let preSeed = 0;
+      if (targetLevelIncome > 0) preSeed += targetLevelIncome;
+      if (targetLevelROI > 0) preSeed += targetLevelROI;
+      if (preSeed > 0) {
+        depositTotalEarnedMap[depIdx] = (depositTotalEarnedMap[depIdx] || 0) + preSeed;
+      }
+    }
+  });
 
   if (onChainEvents && onChainEvents.length > 0) {
     onChainEvents.forEach(e => {
@@ -564,6 +577,20 @@ export function generateEventsList(
       }
     });
 
+    if (onChainEvents && onChainEvents.length > 0) {
+      onChainEvents.forEach(e => {
+        if (!e.isSimulated && (!e.user || e.user.toLowerCase() === userAddrLower)) {
+          if (["level_income", "level_roi", "perf_claim", "perf_instant", "perf_daily", "roi", "booster_roi"].includes(e.type)) {
+            sortedDeposits.forEach((dep, depIdx) => {
+              if (e.timestamp >= dep.timestamp) {
+                depositTotalEarnedMap[depIdx] = (depositTotalEarnedMap[depIdx] || 0) + e.amount;
+              }
+            });
+          }
+        }
+      });
+    }
+
     const realRoiEvents = onChainEvents
       .filter(e => e.type === "roi" && !e.isSimulated && (!e.user || e.user.toLowerCase() === userAddrLower))
       .sort((a, b) => a.timestamp - b.timestamp);
@@ -578,6 +605,10 @@ export function generateEventsList(
 
       if (activeDeps.length > 0) {
         activeDeps.forEach((dep, depIdx) => {
+          const depMaxCap = dep.amount * 2.2;
+          const depCurrentEarned = depositTotalEarnedMap[depIdx] || 0;
+          if (depCurrentEarned >= depMaxCap - 0.0001) return;
+
           const lastTime = depLastUpdateRoiMap[depIdx] || dep.timestamp;
           const timeDiff = e.timestamp - lastTime;
           const numDays = Math.floor(timeDiff / ONE_DAY_SECS);
@@ -585,19 +616,27 @@ export function generateEventsList(
             for (let i = 1; i <= numDays; i++) {
               const payoutTime = lastTime + i * ONE_DAY_SECS;
               const rateBps = depIdx === 0 ? getBoosterRateAtTime(payoutTime) : 50;
-              const intervalAmt = Math.round(((dep.amount * rateBps) / 10000) * 1e8) / 1e8;
+              let intervalAmt = Math.round(((dep.amount * rateBps) / 10000) * 1e8) / 1e8;
 
-              generated.push({
-                type: "roi",
-                typeName: "Daily ROI Payout",
-                fromUser: "Contract",
-                amount: intervalAmt,
-                level: "-",
-                timestamp: payoutTime,
-                status: "Completed",
-                txHash: `0x_gen_roi_${regTime}_anchored_${idx}_${i}_dep${depIdx}`,
-                blockNumber: 0
-              });
+              const currentDepEarnedNow = depositTotalEarnedMap[depIdx] || 0;
+              const remCapNow = Math.max(0, depMaxCap - currentDepEarnedNow);
+              intervalAmt = Math.min(intervalAmt, remCapNow);
+              intervalAmt = Math.round(intervalAmt * 1e8) / 1e8;
+
+              if (intervalAmt > 0) {
+                generated.push({
+                  type: "roi",
+                  typeName: "Daily ROI Payout",
+                  fromUser: "Contract",
+                  amount: intervalAmt,
+                  level: "-",
+                  timestamp: payoutTime,
+                  status: "Completed",
+                  txHash: `0x_gen_roi_${regTime}_anchored_${idx}_${i}_dep${depIdx}`,
+                  blockNumber: 0
+                });
+                depositTotalEarnedMap[depIdx] = (depositTotalEarnedMap[depIdx] || 0) + intervalAmt;
+              }
             }
             depLastUpdateRoiMap[depIdx] = lastTime + numDays * ONE_DAY_SECS;
           }
@@ -657,35 +696,6 @@ export function generateEventsList(
         accumulatedPerf += e.amount;
         cumulativeTotalEarned += e.amount;
         lastUpdatePerf = Math.max(lastUpdatePerf, startTimeForChunk + numPayouts * PERF_ONE_DAY_SECS);
-      }
-    });
-  }
-
-  const depositROIEarnedMap = {};
-  const depositTotalEarnedMap = {};
-
-  // Pre-seed depositTotalEarnedMap with target network income for Deposit 0 (earned before Deposit 1)
-  sortedDeposits.forEach((dep, depIdx) => {
-    if (depIdx === 0) {
-      let preSeed = 0;
-      if (targetLevelIncome > 0) preSeed += targetLevelIncome;
-      if (targetLevelROI > 0) preSeed += targetLevelROI;
-      if (preSeed > 0) {
-        depositTotalEarnedMap[depIdx] = (depositTotalEarnedMap[depIdx] || 0) + preSeed;
-      }
-    }
-  });
-
-  if (onChainEvents && onChainEvents.length > 0) {
-    onChainEvents.forEach(e => {
-      if (!e.isSimulated && (!e.user || e.user.toLowerCase() === userAddrLower)) {
-        if (["level_income", "level_roi", "perf_claim", "perf_instant", "perf_daily", "roi", "booster_roi"].includes(e.type)) {
-          sortedDeposits.forEach((dep, depIdx) => {
-            if (e.timestamp >= dep.timestamp) {
-              depositTotalEarnedMap[depIdx] = (depositTotalEarnedMap[depIdx] || 0) + e.amount;
-            }
-          });
-        }
       }
     });
   }
