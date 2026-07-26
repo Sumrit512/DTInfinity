@@ -49,8 +49,9 @@ export default function DashboardView({
   );
 
   const isUserCapped = userDepNum > 0 && totalEarnedForCapping >= maxNetCap - 0.001;
+  const currentMonthVol = parseFloat(userData?.totalTeamVolume || "0");
 
-  const validQualifications = isUserCapped
+  const validQualifications = (isUserCapped || currentMonthVol === 0)
     ? []
     : (pendingQualifications || []).filter(qual => {
         if (qual.isCappedAtStart) return false;
