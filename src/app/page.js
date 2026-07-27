@@ -126,7 +126,8 @@ export default function Dashboard() {
   const [pendingBalances, setPendingBalances] = useState({
     pendingDaily: "0.00",
     pendingBooster: "0.00",
-    pendingPerf: "0.00"
+    pendingPerf: "0.00",
+    pendingLevelROI: "0.00"
   });
 
   const [directsList, setDirectsList] = useState([]);
@@ -675,7 +676,8 @@ export default function Dashboard() {
         setPendingBalances({
           pendingDaily: formatUSDT(pending.pendingDaily),
           pendingBooster: formatUSDT(pending.pendingBooster),
-          pendingPerf: formatUSDT(pending.pendingPerf)
+          pendingPerf: formatUSDT(pending.pendingPerf),
+          pendingLevelROI: formatUSDT(pending.pendingLevelROI)
         });
 
         setSecondsSinceSync(0);
@@ -1254,6 +1256,7 @@ export default function Dashboard() {
   const displayPendingDaily = parseFloat(pendingBalances.pendingDaily) || 0;
   const displayPendingBooster = parseFloat(pendingBalances.pendingBooster) || 0;
   const displayPendingPerf = parseFloat(pendingBalances.pendingPerf) || 0;
+  const displayPendingLevelROI = parseFloat(pendingBalances.pendingLevelROI) || 0;
 
   const totalDepositsNum = parseFloat(userData.totalDeposits) || 0;
   const maxRoiCap = totalDepositsNum * 2.2;
@@ -1523,22 +1526,6 @@ export default function Dashboard() {
         }
       }
     });
-
-    if (parseFloat(userData.dailyROIEarned || "0") > dailyROI) {
-      dailyROI = parseFloat(userData.dailyROIEarned || "0");
-    }
-    if (parseFloat(userData.roiBoosterEarned || "0") > boosterROI) {
-      boosterROI = parseFloat(userData.roiBoosterEarned || "0");
-    }
-    if (parseFloat(userData.levelIncomeEarned || "0") > levelIncome) {
-      levelIncome = parseFloat(userData.levelIncomeEarned || "0");
-    }
-    if (parseFloat(userData.levelROIEarned || "0") > levelROI) {
-      levelROI = parseFloat(userData.levelROIEarned || "0");
-    }
-    if (parseFloat(userData.performanceBonusEarned || "0") > performance) {
-      performance = parseFloat(userData.performanceBonusEarned || "0");
-    }
 
     const totalEarned = Math.min(dailyROI + boosterROI + levelIncome + levelROI + performance, maxNetworkCap);
     const storedContractClaimable = parseFloat(userData.claimableBalance || "0") + displayPendingDaily + displayPendingBooster + displayPendingPerf + displayPendingLevelROI;
