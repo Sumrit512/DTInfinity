@@ -1526,8 +1526,7 @@ export default function Dashboard() {
       }
     });
 
-    const onChainRoiTotal = parseFloat(userData.dailyROIEarned || "0") + parseFloat(userData.roiBoosterEarned || "0");
-    const totalROIVal = Math.max(roiFromTxs, onChainRoiTotal);
+    const totalROIVal = roiFromTxs;
 
     if (parseFloat(userData.levelIncomeEarned || "0") > levelIncome) {
       levelIncome = parseFloat(userData.levelIncomeEarned || "0");

@@ -645,23 +645,6 @@ export function generateEventsList(
         });
       }
 
-      if (generatedForThisEvt < e.amount - 0.001) {
-        const remAmt = Math.round((e.amount - generatedForThisEvt) * 1e8) / 1e8;
-        if (remAmt > 0) {
-          generated.push({
-            type: "roi",
-            typeName: "Daily ROI Payout",
-            fromUser: "Contract",
-            amount: remAmt,
-            level: "-",
-            timestamp: e.timestamp,
-            status: "Completed",
-            txHash: e.txHash || `0x_gen_roi_${regTime}_anchored_${idx}_rem`,
-            blockNumber: e.blockNumber || 0
-          });
-        }
-      }
-
       accumulatedDailyROI += e.amount;
       cumulativeTotalEarned += e.amount;
     });
