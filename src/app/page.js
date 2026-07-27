@@ -1507,17 +1507,16 @@ export default function Dashboard() {
   }, [unmergedTxs]);
 
   const statsToDisplay = useMemo(() => {
-    let dailyROI = 0;
-    let boosterROI = 0;
+    let roiFromTxs = 0;
     let levelIncome = 0;
     let levelROI = 0;
     let performance = 0;
     let perfDailyInContract = 0;
 
     unmergedTxs.forEach(tx => {
-      if (tx.type === "roi") dailyROI += tx.amount;
-      else if (tx.type === "booster_roi") boosterROI += tx.amount;
-      else if (tx.type === "level_income") levelIncome += tx.amount;
+      if (tx.type === "roi" || tx.type === "booster_roi") {
+        roiFromTxs += tx.amount;
+      } else if (tx.type === "level_income") levelIncome += tx.amount;
       else if (tx.type === "level_roi") levelROI += tx.amount;
       else if (["perf_instant", "perf_daily", "perf_claim"].includes(tx.type)) {
         performance += tx.amount;
@@ -1527,12 +1526,9 @@ export default function Dashboard() {
       }
     });
 
-    if (parseFloat(userData.dailyROIEarned || "0") > dailyROI) {
-      dailyROI = parseFloat(userData.dailyROIEarned || "0");
-    }
-    if (parseFloat(userData.roiBoosterEarned || "0") > boosterROI) {
-      boosterROI = parseFloat(userData.roiBoosterEarned || "0");
-    }
+    const onChainRoiTotal = parseFloat(userData.dailyROIEarned || "0") + parseFloat(userData.roiBoosterEarned || "0");
+    const totalROIVal = Math.max(roiFromTxs, onChainRoiTotal);
+
     if (parseFloat(userData.levelIncomeEarned || "0") > levelIncome) {
       levelIncome = parseFloat(userData.levelIncomeEarned || "0");
     }
@@ -1543,17 +1539,17 @@ export default function Dashboard() {
       performance = parseFloat(userData.performanceBonusEarned || "0");
     }
 
-    const totalEarned = Math.min(dailyROI + boosterROI + levelIncome + levelROI + performance, maxNetworkCap);
+    const totalEarned = Math.min(totalROIVal + levelIncome + levelROI + performance, maxNetworkCap);
     const storedContractClaimable = parseFloat(userData.claimableBalance || "0") + displayPendingDaily + displayPendingBooster + displayPendingPerf + displayPendingLevelROI;
     const claimableInContract = Math.max(0, Math.min(storedContractClaimable, maxNetworkCap));
 
     return {
-      dailyROI: dailyROI.toFixed(2),
-      boosterROI: boosterROI.toFixed(2),
+      dailyROI: totalROIVal.toFixed(2),
+      boosterROI: "0.00",
       levelIncome: levelIncome.toFixed(2),
       levelROI: levelROI.toFixed(2),
       performance: performance.toFixed(2),
-      totalROI: (dailyROI + boosterROI).toFixed(2),
+      totalROI: totalROIVal.toFixed(2),
       totalEarned: totalEarned.toFixed(2),
       totalAvailable: claimableInContract.toFixed(2)
     };

@@ -581,7 +581,7 @@ export function generateEventsList(
     if (onChainEvents && onChainEvents.length > 0) {
       onChainEvents.forEach(e => {
         if (!e.isSimulated && (!e.user || e.user.toLowerCase() === userAddrLower)) {
-          if (["level_income", "level_roi", "perf_claim", "perf_instant", "perf_daily", "roi", "booster_roi"].includes(e.type)) {
+          if (["level_income", "level_roi", "perf_claim", "perf_instant"].includes(e.type)) {
             sortedDeposits.forEach((dep, depIdx) => {
               if (e.timestamp >= dep.timestamp) {
                 depositTotalEarnedMap[depIdx] = (depositTotalEarnedMap[depIdx] || 0) + e.amount;
@@ -603,6 +603,7 @@ export function generateEventsList(
 
     realRoiEvents.forEach((e, idx) => {
       const activeDeps = sortedDeposits.filter(d => d.timestamp <= e.timestamp);
+      let generatedForThisEvt = 0;
 
       if (activeDeps.length > 0) {
         activeDeps.forEach((dep, depIdx) => {
@@ -636,13 +637,31 @@ export function generateEventsList(
                   txHash: `0x_gen_roi_${regTime}_anchored_${idx}_${i}_dep${depIdx}`,
                   blockNumber: 0
                 });
-                depositTotalEarnedMap[depIdx] = (depositTotalEarnedMap[depIdx] || 0) + intervalAmt;
+                generatedForThisEvt += intervalAmt;
               }
             }
             depLastUpdateRoiMap[depIdx] = lastTime + numDays * ONE_DAY_SECS;
           }
         });
       }
+
+      if (generatedForThisEvt < e.amount - 0.001) {
+        const remAmt = Math.round((e.amount - generatedForThisEvt) * 1e8) / 1e8;
+        if (remAmt > 0) {
+          generated.push({
+            type: "roi",
+            typeName: "Daily ROI Payout",
+            fromUser: "Contract",
+            amount: remAmt,
+            level: "-",
+            timestamp: e.timestamp,
+            status: "Completed",
+            txHash: e.txHash || `0x_gen_roi_${regTime}_anchored_${idx}_rem`,
+            blockNumber: e.blockNumber || 0
+          });
+        }
+      }
+
       accumulatedDailyROI += e.amount;
       cumulativeTotalEarned += e.amount;
     });
