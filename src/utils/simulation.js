@@ -548,6 +548,7 @@ export function generateEventsList(
   const generated = [];
   const depositROIEarnedMap = {};
   const depositTotalEarnedMap = {};
+  const tierPerfEarnedMap = {};
 
   // Pre-seed depositTotalEarnedMap with target network income for Deposit 0 (earned before Deposit 1)
   sortedDeposits.forEach((dep, depIdx) => {
@@ -670,9 +671,13 @@ export function generateEventsList(
 
     realPerfEvents.forEach((e, idx) => {
       let dailyRate = 5;
+      let tIdx = 0;
       if (localActiveBonuses && localActiveBonuses.length > 0) {
         const match = localActiveBonuses.find(b => b.tierIndex === e.tierIndex) || localActiveBonuses[0];
         dailyRate = match.dailyRate;
+        tIdx = match.tierIndex !== undefined ? Number(match.tierIndex) : 0;
+      } else if (e.tierIndex !== undefined && e.tierIndex !== null) {
+        tIdx = Number(e.tierIndex);
       }
       const numPayouts = Math.round(e.amount / dailyRate);
       if (numPayouts > 0) {
@@ -689,8 +694,10 @@ export function generateEventsList(
               timestamp: payoutTime,
               status: "Completed",
               txHash: `0x_gen_perf_${e.timestamp}_anchored_${idx}_${i}`,
-              blockNumber: 0
+              blockNumber: 0,
+              tierIndex: tIdx
             });
+            tierPerfEarnedMap[tIdx] = (tierPerfEarnedMap[tIdx] || 0) + dailyRate;
           }
         }
         accumulatedPerf += e.amount;
@@ -852,6 +859,11 @@ export function generateEventsList(
     }
 
     if (evt.type === "candidate_perf_daily") {
+      const tIdx = evt.tierIndex !== undefined ? Number(evt.tierIndex) : 0;
+      const tierMaxAllowed = 30 * evt.dailyRate;
+      const tierEarned = tierPerfEarnedMap[tIdx] || 0;
+      if (tierEarned >= tierMaxAllowed - 0.001) continue;
+
       const hasAnchoredEvt = generated.some(g => 
         g.type === "perf_daily" && 
         Math.abs(g.timestamp - evt.timestamp) < 200
@@ -862,6 +874,9 @@ export function generateEventsList(
       if (targetPerf > 0 && accumulatedPerf >= targetPerf - 0.001) continue;
 
       let amt = evt.dailyRate;
+      const remTierCap = Math.max(0, tierMaxAllowed - tierEarned);
+      if (amt > remTierCap) amt = remTierCap;
+
       if (targetPerf > 0 && accumulatedPerf + amt > targetPerf) {
         amt = targetPerf - accumulatedPerf;
       }
@@ -883,6 +898,7 @@ export function generateEventsList(
           blockNumber: 0,
           tierIndex: evt.tierIndex
         });
+        tierPerfEarnedMap[tIdx] = (tierPerfEarnedMap[tIdx] || 0) + amt;
         accumulatedPerf += amt;
         cumulativeTotalEarned += amt;
       }

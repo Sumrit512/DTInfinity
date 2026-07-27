@@ -1541,6 +1541,7 @@ export default function Dashboard() {
     }
 
     const totalEarned = Math.min(dailyROI + boosterROI + levelIncome + levelROI + performance, maxNetworkCap);
+    const totalWithdrawnNum = parseFloat(userData.totalWithdrawn || "0");
     let elapsedContractYield = 0;
     const currentNowSecs = Math.floor(Date.now() / 1000);
     unmergedTxs.forEach(tx => {
