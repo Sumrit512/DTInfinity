@@ -550,18 +550,8 @@ export function generateEventsList(
   const depositTotalEarnedMap = {};
   const tierPerfEarnedMap = {};
 
-  // Pre-seed depositTotalEarnedMap with target network income for Deposit 0 (earned before Deposit 1)
-  sortedDeposits.forEach((dep, depIdx) => {
-    if (depIdx === 0) {
-      let preSeed = 0;
-      if (targetLevelIncome > 0) preSeed += targetLevelIncome;
-      if (targetLevelROI > 0) preSeed += targetLevelROI;
-      if (preSeed > 0) {
-        depositTotalEarnedMap[depIdx] = (depositTotalEarnedMap[depIdx] || 0) + preSeed;
-      }
-    }
-  });
-
+  // depositROIEarnedMap tracks ROI per deposit against depMaxCap (220%)
+  // cumulativeTotalEarned tracks total network earnings against maxNetworkCap (400%)
   if (onChainEvents && onChainEvents.length > 0) {
     onChainEvents.forEach(e => {
       if (!e.isSimulated && (!e.user || e.user.toLowerCase() === userAddrLower)) {
@@ -577,20 +567,7 @@ export function generateEventsList(
         }
       }
     });
-
-    if (onChainEvents && onChainEvents.length > 0) {
-      onChainEvents.forEach(e => {
-        if (!e.isSimulated && (!e.user || e.user.toLowerCase() === userAddrLower)) {
-          if (["level_income", "level_roi", "perf_claim", "perf_instant"].includes(e.type)) {
-            sortedDeposits.forEach((dep, depIdx) => {
-              if (e.timestamp >= dep.timestamp) {
-                depositTotalEarnedMap[depIdx] = (depositTotalEarnedMap[depIdx] || 0) + e.amount;
-              }
-            });
-          }
-        }
-      });
-    }
+  }
 
     const realRoiEvents = onChainEvents
       .filter(e => e.type === "roi" && !e.isSimulated && (!e.user || e.user.toLowerCase() === userAddrLower))
@@ -704,22 +681,22 @@ export function generateEventsList(
         }
         accumulatedPerf += e.amount;
         cumulativeTotalEarned += e.amount;
-        lastUpdatePerf = Math.max(lastUpdatePerf, startTimeForChunk + numPayouts * PERF_ONE_DAY_SECS);
       }
     });
-  }
 
   generated.forEach(e => {
-    sortedDeposits.forEach((dep, depIdx) => {
-      if (e.timestamp >= dep.timestamp) {
-        depositTotalEarnedMap[depIdx] = (depositTotalEarnedMap[depIdx] || 0) + e.amount;
-      }
-    });
-    if (e.type === "roi" && e.txHash) {
-      const match = e.txHash.match(/dep(\d+)/);
-      if (match) {
-        const depIdx = Number(match[1]);
-        depositROIEarnedMap[depIdx] = (depositROIEarnedMap[depIdx] || 0) + e.amount;
+    if (e.type === "roi" || e.type === "booster_roi") {
+      sortedDeposits.forEach((dep, depIdx) => {
+        if (e.timestamp >= dep.timestamp) {
+          depositTotalEarnedMap[depIdx] = (depositTotalEarnedMap[depIdx] || 0) + e.amount;
+        }
+      });
+      if (e.txHash) {
+        const match = e.txHash.match(/dep(\d+)/);
+        if (match) {
+          const depIdx = Number(match[1]);
+          depositROIEarnedMap[depIdx] = (depositROIEarnedMap[depIdx] || 0) + e.amount;
+        }
       }
     }
   });
