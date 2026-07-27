@@ -1541,22 +1541,8 @@ export default function Dashboard() {
     }
 
     const totalEarned = Math.min(dailyROI + boosterROI + levelIncome + levelROI + performance, maxNetworkCap);
-    const totalWithdrawnNum = parseFloat(userData.totalWithdrawn || "0");
-    let elapsedContractYield = 0;
-    const currentNowSecs = Math.floor(Date.now() / 1000);
-    unmergedTxs.forEach(tx => {
-      if (tx.timestamp <= currentNowSecs) {
-        if (tx.type === "roi" || tx.type === "booster_roi" || tx.type === "level_roi") {
-          elapsedContractYield += tx.amount;
-        } else if (tx.type === "perf_daily" || tx.type === "perf_claim") {
-          elapsedContractYield += tx.amount;
-        }
-      }
-    });
-
-    const storedContractClaimable = parseFloat(userData.claimableBalance || "0") + displayPendingDaily + displayPendingBooster + displayPendingPerf;
-    const bestElapsedClaimable = Math.max(elapsedContractYield, storedContractClaimable);
-    const claimableInContract = Math.max(0, Math.min(bestElapsedClaimable, maxNetworkCap) - totalWithdrawnNum);
+    const storedContractClaimable = parseFloat(userData.claimableBalance || "0") + displayPendingDaily + displayPendingBooster + displayPendingPerf + displayPendingLevelROI;
+    const claimableInContract = Math.max(0, Math.min(storedContractClaimable, maxNetworkCap));
 
     return {
       dailyROI: dailyROI.toFixed(2),
@@ -1568,7 +1554,7 @@ export default function Dashboard() {
       totalEarned: totalEarned.toFixed(2),
       totalAvailable: claimableInContract.toFixed(2)
     };
-  }, [unmergedTxs, userData, displayPendingDaily, displayPendingBooster, displayPendingPerf, maxNetworkCap]);
+  }, [unmergedTxs, userData, displayPendingDaily, displayPendingBooster, displayPendingPerf, displayPendingLevelROI, maxNetworkCap]);
 
   const lifetimeTeamVol = useMemo(() => {
     if (!treeNodes || !walletAddress) return parseFloat(userData.totalTeamVolume || "0");
