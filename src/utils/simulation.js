@@ -617,50 +617,26 @@ export function generateEventsList(
             for (let i = 1; i <= numDays; i++) {
               const payoutTime = lastTime + i * ONE_DAY_SECS;
               const rateBps = depIdx === 0 ? getBoosterRateAtTime(payoutTime) : 50;
-              const baseBps = Math.min(rateBps, 50);
-              const boosterBps = Math.max(0, rateBps - 50);
-
-              let baseAmt = Math.round(((dep.amount * baseBps) / 10000) * 1e8) / 1e8;
-              let boosterAmt = Math.round(((dep.amount * boosterBps) / 10000) * 1e8) / 1e8;
+              let intervalAmt = Math.round(((dep.amount * rateBps) / 10000) * 1e8) / 1e8;
 
               const currentDepEarnedNow = depositTotalEarnedMap[depIdx] || 0;
               const remCapNow = Math.max(0, depMaxCap - currentDepEarnedNow);
-              baseAmt = Math.min(baseAmt, remCapNow);
-              baseAmt = Math.round(baseAmt * 1e8) / 1e8;
+              intervalAmt = Math.min(intervalAmt, remCapNow);
+              intervalAmt = Math.round(intervalAmt * 1e8) / 1e8;
 
-              if (baseAmt > 0) {
+              if (intervalAmt > 0) {
                 generated.push({
                   type: "roi",
                   typeName: "Daily ROI Payout",
                   fromUser: "Contract",
-                  amount: baseAmt,
+                  amount: intervalAmt,
                   level: "-",
                   timestamp: payoutTime,
                   status: "Completed",
                   txHash: `0x_gen_roi_${regTime}_anchored_${idx}_${i}_dep${depIdx}`,
                   blockNumber: 0
                 });
-                depositTotalEarnedMap[depIdx] = (depositTotalEarnedMap[depIdx] || 0) + baseAmt;
-              }
-
-              if (boosterAmt > 0) {
-                const remCapAfterBase = Math.max(0, depMaxCap - (depositTotalEarnedMap[depIdx] || 0));
-                boosterAmt = Math.min(boosterAmt, remCapAfterBase);
-                boosterAmt = Math.round(boosterAmt * 1e8) / 1e8;
-                if (boosterAmt > 0) {
-                  generated.push({
-                    type: "booster_roi",
-                    typeName: "ROI Booster Payout",
-                    fromUser: "Contract",
-                    amount: boosterAmt,
-                    level: "-",
-                    timestamp: payoutTime,
-                    status: "Completed",
-                    txHash: `0x_gen_booster_${regTime}_anchored_${idx}_${i}_dep${depIdx}`,
-                    blockNumber: 0
-                  });
-                  depositTotalEarnedMap[depIdx] = (depositTotalEarnedMap[depIdx] || 0) + boosterAmt;
-                }
+                depositTotalEarnedMap[depIdx] = (depositTotalEarnedMap[depIdx] || 0) + intervalAmt;
               }
             }
             depLastUpdateRoiMap[depIdx] = lastTime + numDays * ONE_DAY_SECS;
@@ -843,74 +819,39 @@ export function generateEventsList(
       if (depCurrentEarned < depMaxCap - 0.0001) {
         // Booster ROI applies ONLY to First Deposit (evt.isFirstDeposit / depIdx === 0)
         const rateBps = evt.isFirstDeposit ? getBoosterRateAtTime(evt.timestamp) : 50;
-        const baseBps = Math.min(rateBps, 50);
-        const boosterBps = Math.max(0, rateBps - 50);
 
         const isFutureRoi = evt.timestamp > lastUpdateROI;
         if (isFutureRoi || targetDailyROI === 0 || accumulatedDailyROI < targetDailyROI - 0.0001) {
-          let baseAmt = (depAmount * baseBps) / 10000;
-          let boosterAmt = (depAmount * boosterBps) / 10000;
-
-          if (!isFutureRoi && targetDailyROI > 0 && accumulatedDailyROI + baseAmt > targetDailyROI) {
-            baseAmt = targetDailyROI - accumulatedDailyROI;
+          let roiAmt = (depAmount * rateBps) / 10000;
+          if (!isFutureRoi && targetDailyROI > 0 && accumulatedDailyROI + roiAmt > targetDailyROI) {
+            roiAmt = targetDailyROI - accumulatedDailyROI;
           }
           const curRemDepCap = Math.max(0, depMaxCap - depCurrentEarned);
           const curRemRoiCap = Math.max(0, maxRoiCap - cumulativeTotalEarned);
           const curRemNetCap = Math.max(0, maxNetworkCap - cumulativeTotalEarned);
-          baseAmt = Math.min(baseAmt, curRemDepCap, curRemRoiCap, curRemNetCap);
-          baseAmt = Math.round(baseAmt * 1e8) / 1e8;
+          roiAmt = Math.min(roiAmt, curRemDepCap, curRemRoiCap, curRemNetCap);
+          roiAmt = Math.round(roiAmt * 1e8) / 1e8;
 
-          if (baseAmt > 0) {
+          if (roiAmt > 0) {
             generated.push({
               type: "roi",
               typeName: "Daily ROI Payout",
               fromUser: "Contract",
-              amount: baseAmt,
+              amount: roiAmt,
               level: "-",
               timestamp: evt.timestamp,
               status: "Completed",
               txHash: `0x_gen_roi_${regTime}_dep${depIdx}_${evt.day}`,
               blockNumber: 0
             });
-            depositROIEarnedMap[depIdx] = (depositROIEarnedMap[depIdx] || 0) + baseAmt;
+            depositROIEarnedMap[depIdx] = (depositROIEarnedMap[depIdx] || 0) + roiAmt;
             sortedDeposits.forEach((dep, dIdx) => {
               if (evt.timestamp >= dep.timestamp) {
-                depositTotalEarnedMap[dIdx] = (depositTotalEarnedMap[dIdx] || 0) + baseAmt;
+                depositTotalEarnedMap[dIdx] = (depositTotalEarnedMap[dIdx] || 0) + roiAmt;
               }
             });
-            accumulatedDailyROI += baseAmt;
-            cumulativeTotalEarned += baseAmt;
-          }
-
-          if (boosterAmt > 0) {
-            const depEarnedNow = depositTotalEarnedMap[depIdx] || 0;
-            const remDepCapNow = Math.max(0, depMaxCap - depEarnedNow);
-            const remRoiCapNow = Math.max(0, maxRoiCap - cumulativeTotalEarned);
-            const remNetCapNow = Math.max(0, maxNetworkCap - cumulativeTotalEarned);
-            boosterAmt = Math.min(boosterAmt, remDepCapNow, remRoiCapNow, remNetCapNow);
-            boosterAmt = Math.round(boosterAmt * 1e8) / 1e8;
-
-            if (boosterAmt > 0) {
-              generated.push({
-                type: "booster_roi",
-                typeName: "ROI Booster Payout",
-                fromUser: "Contract",
-                amount: boosterAmt,
-                level: "-",
-                timestamp: evt.timestamp,
-                status: "Completed",
-                txHash: `0x_gen_booster_${regTime}_dep${depIdx}_${evt.day}`,
-                blockNumber: 0
-              });
-              depositROIEarnedMap[depIdx] = (depositROIEarnedMap[depIdx] || 0) + boosterAmt;
-              sortedDeposits.forEach((dep, dIdx) => {
-                if (evt.timestamp >= dep.timestamp) {
-                  depositTotalEarnedMap[dIdx] = (depositTotalEarnedMap[dIdx] || 0) + boosterAmt;
-                }
-              });
-              accumulatedBoosterROI += boosterAmt;
-              cumulativeTotalEarned += boosterAmt;
-            }
+            accumulatedDailyROI += roiAmt;
+            cumulativeTotalEarned += roiAmt;
           }
         }
       }

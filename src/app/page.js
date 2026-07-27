@@ -1527,6 +1527,22 @@ export default function Dashboard() {
       }
     });
 
+    if (parseFloat(userData.dailyROIEarned || "0") > dailyROI) {
+      dailyROI = parseFloat(userData.dailyROIEarned || "0");
+    }
+    if (parseFloat(userData.roiBoosterEarned || "0") > boosterROI) {
+      boosterROI = parseFloat(userData.roiBoosterEarned || "0");
+    }
+    if (parseFloat(userData.levelIncomeEarned || "0") > levelIncome) {
+      levelIncome = parseFloat(userData.levelIncomeEarned || "0");
+    }
+    if (parseFloat(userData.levelROIEarned || "0") > levelROI) {
+      levelROI = parseFloat(userData.levelROIEarned || "0");
+    }
+    if (parseFloat(userData.performanceBonusEarned || "0") > performance) {
+      performance = parseFloat(userData.performanceBonusEarned || "0");
+    }
+
     const totalEarned = Math.min(dailyROI + boosterROI + levelIncome + levelROI + performance, maxNetworkCap);
     const storedContractClaimable = parseFloat(userData.claimableBalance || "0") + displayPendingDaily + displayPendingBooster + displayPendingPerf + displayPendingLevelROI;
     const claimableInContract = Math.max(0, Math.min(storedContractClaimable, maxNetworkCap));
