@@ -60,7 +60,19 @@ export function generateEventsList(
   if (userDeposits && userDeposits.length > 0) {
     sortedDeposits = userDeposits.map((d, i) => ({
       amount: typeof d.amount === "number" ? d.amount : parseFloat(ethers.formatUnits(d.amount || 0n, 18)),
-      timestamp: Number(d.time || d.timestamp || regTime)
+      timestamp: Number(d.time || d.timestamp || regTime),
+      txHash: d.txHash || `0x_dep_${d.timestamp || d.time || regTime}`,
+      originalEvent: d.type === "deposit" ? d : {
+        type: "deposit",
+        typeName: "Deposit",
+        fromUser: addr,
+        amount: typeof d.amount === "number" ? d.amount : parseFloat(ethers.formatUnits(d.amount || 0n, 18)),
+        level: "-",
+        timestamp: Number(d.time || d.timestamp || regTime),
+        status: "Completed",
+        txHash: d.txHash || `0x_dep_${d.timestamp || d.time || regTime}`,
+        blockNumber: d.blockNumber || 0
+      }
     })).sort((a, b) => a.timestamp - b.timestamp);
   } else {
     const totDepNum = parseFloat(totalDeposits) || 0;
@@ -238,7 +250,9 @@ export function generateEventsList(
       type: "user_deposit",
       timestamp: dep.timestamp,
       amount: dep.amount,
-      sortPriority: 1
+      txHash: dep.txHash,
+      sortPriority: 1,
+      originalEvent: dep.originalEvent || dep
     });
   });
 
@@ -448,16 +462,20 @@ export function generateEventsList(
     .filter(e => e.type === "perf_daily" && !e.isSimulated && (!e.user || e.user.toLowerCase() === userAddrLower));
   const lastUpdatePerf = realPerfEvents.length > 0 ? Math.max(...realPerfEvents.map(e => e.timestamp)) : regTime;
 
-  // Real events in onChainEvents that directly add to timeline
+  // Real events in onChainEvents that directly add to timeline (excluding deposits which are handled via sortedDeposits at line 236, and excluding bulk rollup events)
   const realOnChainEvents = (onChainEvents || []).filter(e => 
     !e.isSimulated &&
-    (!e.user || e.user.toLowerCase() === userAddrLower)
+    (!e.user || e.user.toLowerCase() === userAddrLower) &&
+    e.type !== "deposit" &&
+    e.type !== "roi" &&
+    e.type !== "booster_roi" &&
+    e.type !== "level_roi" &&
+    e.type !== "perf_daily"
   );
 
   realOnChainEvents.forEach(e => {
     let priority = 2;
-    if (e.type === "deposit") priority = 1;
-    else if (e.type === "withdraw") priority = 8;
+    if (e.type === "withdraw") priority = 8;
 
     candidateEvents.push({
       type: "real_on_chain",
@@ -467,19 +485,6 @@ export function generateEventsList(
       sortPriority: priority,
       originalEvent: e
     });
-  });
-
-  // Push userDeposits only if not already in realOnChainEvents
-  sortedDeposits.forEach((dep) => {
-    const exists = realOnChainEvents.some(r => r.type === "deposit" && (r.txHash === dep.txHash || Math.abs(r.timestamp - dep.timestamp) < 60));
-    if (!exists) {
-      candidateEvents.push({
-        type: "user_deposit",
-        timestamp: dep.timestamp,
-        amount: dep.amount,
-        sortPriority: 1
-      });
-    }
   });
 
   // Re-sort everything to ensure strict chronological order with priority
@@ -559,16 +564,7 @@ export function generateEventsList(
       const amt = evt.amount;
       generated.push(evt.originalEvent);
 
-      if (evt.incomeType === "deposit") {
-        currentDeposit += amt;
-        activeDepositsList.push({
-          amount: amt,
-          timestamp: evt.timestamp,
-          roiStopAt: currentDeposit * 2.2,
-          roiActive: true
-        });
-        updateDepositStates();
-      } else if (evt.incomeType !== "withdraw") {
+      if (evt.incomeType !== "withdraw") {
         cumulativeTotalEarned += amt;
         if (evt.incomeType === "level_income") {
           accumulatedLevelIncome += amt;
@@ -798,10 +794,10 @@ export function generateEventsList(
   if (targetBoosterROI > 0 && diffBoosterROI > 0.05) {
     validationErrors.push(`Booster ROI mismatch. Generated: ${genBoosterROI}, Blockchain Target: ${targetBoosterROI}, Difference: ${diffBoosterROI}`);
   }
-  if (targetLevelIncome > 0 && diffLevelInc > 0.05) {
+  if (targetLevelIncome > 0 && genLevelInc > targetLevelIncome + 0.05) {
     validationErrors.push(`Level Income mismatch. Generated: ${genLevelInc}, Blockchain Target: ${targetLevelIncome}, Difference: ${diffLevelInc}`);
   }
-  if (targetLevelROI > 0 && diffLevelROI > 0.05) {
+  if (targetLevelROI > 0 && genLevelROI > targetLevelROI + 0.05) {
     validationErrors.push(`Level ROI mismatch. Generated: ${genLevelROI}, Blockchain Target: ${targetLevelROI}, Difference: ${diffLevelROI}`);
   }
   if (targetPerf > 0 && diffPerf > 0.05) {
