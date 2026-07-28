@@ -535,7 +535,7 @@ export default function Dashboard() {
       const provider = new ethers.BrowserProvider(window.ethereum);
       const dtContract = new ethers.Contract(dtInfinityAddress, DT_INFINITY_ABI, provider);
       let currentPerfOneDayVal = 120n;
-      try { currentPerfOneDayVal = await dtContract.PERF_ONE_DAY(); } catch(_) {}
+      try { currentPerfOneDayVal = await dtContract.PERF_ONE_DAY(); } catch (_) { }
 
       const qualifications = [];
       const nowUnix = Math.floor(Date.now() / 1000);
@@ -578,7 +578,7 @@ export default function Dashboard() {
       refreshPendingQualifications(walletAddress);
     }, 10000);
     return () => clearInterval(interval);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [walletConnected, isRegistered, walletAddress, dtInfinityAddress]);
 
   async function loadBlockchainData(addr, sessionTxDetails = null) {
@@ -725,7 +725,7 @@ export default function Dashboard() {
                 }
               }
             });
-          } catch (logErr) {}
+          } catch (logErr) { }
 
           rawDeposits.sort((a, b) => a.timestamp - b.timestamp);
           if (rawDeposits.length > 0) {
@@ -780,10 +780,10 @@ export default function Dashboard() {
           const userDepNum = parseFloat(ethers.formatUnits(basicInfo.totalDeposits || 0n, 18));
           const maxNetCap = userDepNum * 4.0;
           const totEarnedOnChain = parseFloat(formatUSDT(incomeInfo.dailyROIEarned)) +
-                                  parseFloat(formatUSDT(incomeInfo.roiBoosterEarned)) +
-                                  parseFloat(formatUSDT(incomeInfo.levelIncomeEarned)) +
-                                  parseFloat(formatUSDT(incomeInfo.levelROIEarned)) +
-                                  parseFloat(formatUSDT(incomeInfo.performanceBonusEarned));
+            parseFloat(formatUSDT(incomeInfo.roiBoosterEarned)) +
+            parseFloat(formatUSDT(incomeInfo.levelIncomeEarned)) +
+            parseFloat(formatUSDT(incomeInfo.levelROIEarned)) +
+            parseFloat(formatUSDT(incomeInfo.performanceBonusEarned));
           const isUserCappedOnChain = userDepNum > 0 && totEarnedOnChain >= maxNetCap - 0.001;
 
           if (!isUserCappedOnChain) {
@@ -812,7 +812,7 @@ export default function Dashboard() {
                     });
                   }
                 }
-                
+
                 qualifications.push({
                   tierIndex: t,
                   target: PERFORMANCE_TIERS[t].target,
@@ -929,7 +929,7 @@ export default function Dashboard() {
                     actualTxHash: txHash
                   }]
                 });
-              } catch (_) {}
+              } catch (_) { }
             }
           } else if (parsed.name === "LevelIncomePaid") {
             eventsToSave.push({
@@ -978,7 +978,7 @@ export default function Dashboard() {
                     actualAmount = Math.round((netAmt / 0.90) * 100) / 100;
                     break;
                   }
-                } catch (_) {}
+                } catch (_) { }
               }
             }
 
@@ -1296,7 +1296,7 @@ export default function Dashboard() {
     const list = [];
     (activeBonuses || []).forEach(b => {
       if (b.tierIndex !== undefined && instantClaimedTiers.has(Number(b.tierIndex))) return;
-      const isDup = list.some(existing => 
+      const isDup = list.some(existing =>
         (existing.tierIndex !== undefined && existing.tierIndex === b.tierIndex) ||
         Math.abs(existing.startTime - b.startTime) < 300
       );
@@ -1327,10 +1327,10 @@ export default function Dashboard() {
     const regTimeNum = Number(userData.registrationTime || 0);
 
     const totalEarnedSoFar = parseFloat(userData.levelIncomeEarned || "0") +
-                            parseFloat(userData.levelROIEarned || "0") +
-                            parseFloat(userData.performanceBonusEarned || "0") +
-                            parseFloat(userData.dailyROIEarned || "0") +
-                            parseFloat(userData.roiBoosterEarned || "0");
+      parseFloat(userData.levelROIEarned || "0") +
+      parseFloat(userData.performanceBonusEarned || "0") +
+      parseFloat(userData.dailyROIEarned || "0") +
+      parseFloat(userData.roiBoosterEarned || "0");
     const maxNetworkCap = userDepNum * 4.0;
     if (userDepNum > 0 && totalEarnedSoFar >= maxNetworkCap) {
       return [];
@@ -1342,7 +1342,7 @@ export default function Dashboard() {
       const isExpired = nowUnix >= endClaimTime;
       if (isExpired && !qual.isCappedAtStart && userDepNum >= 50) {
         if (!instantClaimedTiers.has(qual.tierIndex)) {
-          const exists = list.some(b => 
+          const exists = list.some(b =>
             (b.tierIndex !== undefined && b.tierIndex === qual.tierIndex) ||
             Math.abs(b.startTime - claimTimeNum) < 300
           );
@@ -1410,8 +1410,8 @@ export default function Dashboard() {
 
       if (highestQualifiedIdx >= 0 && !instantClaimedTiers.has(highestQualifiedIdx)) {
         const tier = PERFORMANCE_TIERS[highestQualifiedIdx];
-        const qualClaimTime = (pendingQualifications && pendingQualifications.length > 0 && Number(pendingQualifications[0].claimTime) > 0) 
-          ? Number(pendingQualifications[0].claimTime) 
+        const qualClaimTime = (pendingQualifications && pendingQualifications.length > 0 && Number(pendingQualifications[0].claimTime) > 0)
+          ? Number(pendingQualifications[0].claimTime)
           : 1784773800;
         list.push({
           tierIndex: highestQualifiedIdx,
