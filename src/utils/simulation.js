@@ -695,7 +695,13 @@ export function generateEventsList(
     }
 
     if (evt.type === "candidate_roi_tick") {
-      if (hasRealROI) continue;
+      const isCoveredByReal = (onChainEvents || []).some(real => 
+        !real.isSimulated &&
+        (real.type === "roi" || real.type === "booster_roi") &&
+        (!real.user || real.user.toLowerCase() === userAddrLower) &&
+        Math.abs(real.timestamp - evt.timestamp) < (ONE_DAY_SECS / 2)
+      );
+      if (isCoveredByReal) continue;
       activeDepositsList.forEach((deposit, depIdx) => {
         if (deposit.timestamp > evt.timestamp || !deposit.roiActive) return;
         if (cumulativeTotalEarned >= maxNetworkCap - 0.0001) return;
