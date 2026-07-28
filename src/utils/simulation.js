@@ -513,7 +513,7 @@ export function generateEventsList(
       const isSameAmount = Math.abs((parseFloat(real.amount) || 0) - (parseFloat(simEvt.amount) || 0)) < 0.01;
 
       if (realType === "level_income") {
-        return (isSameUser && isSameAmount) || (isSameUser && isSameLevel);
+        return isSameUser && isSameLevel && isSameAmount;
       }
 
       return isSameUser && isSameLevel && isSameAmount;
@@ -523,7 +523,8 @@ export function generateEventsList(
   // Helper function to update active/inactive state of deposits
   function updateDepositStates() {
     activeDepositsList.forEach(dep => {
-      if (cumulativeTotalEarned >= dep.roiStopAt - 0.0001) {
+      const isRoiSatisfied = targetDailyROI <= 0 || accumulatedDailyROI >= targetDailyROI - 0.0001;
+      if (cumulativeTotalEarned >= dep.roiStopAt - 0.0001 && isRoiSatisfied) {
         dep.roiActive = false;
       }
     });
@@ -557,6 +558,42 @@ export function generateEventsList(
         roiActive: true
       });
       updateDepositStates();
+
+      // Check if un-accrued candidate level income can now be satisfied after cap expansion
+      if (targetLevelIncome > 0) {
+        const totalRealLevelIncome = candidateEvents
+          .filter(e => e.type === "real_on_chain" && e.incomeType === "level_income")
+          .reduce((s, e) => s + e.amount, 0);
+        const maxCandidateAllowed = Math.max(0, targetLevelIncome - totalRealLevelIncome);
+        const candidateSoFar = generated
+          .filter(e => e.type === "level_income" && (e.isSimulated || !e.txHash || e.txHash.startsWith("0x_gen_")))
+          .reduce((s, e) => s + e.amount, 0);
+
+        let remCandidateNeeded = maxCandidateAllowed - candidateSoFar;
+        if (remCandidateNeeded > 0.001) {
+          const maxNetCapNew = currentDeposit * 4.0;
+          const remNetCapNew = Math.max(0, maxNetCapNew - cumulativeTotalEarned);
+          let catchupAmt = Math.min(remCandidateNeeded, remNetCapNew);
+          catchupAmt = Math.round(catchupAmt * 1e8) / 1e8;
+          if (catchupAmt > 0) {
+            generated.push({
+              type: "level_income",
+              typeName: "Level Income",
+              fromUser: "Downline",
+              amount: catchupAmt,
+              level: "1",
+              timestamp: evt.timestamp,
+              status: "Completed",
+              txHash: `0x_gen_lvl_inc_cap_expansion_${evt.timestamp}`,
+              blockNumber: 0,
+              isSimulated: true
+            });
+            accumulatedLevelIncome += catchupAmt;
+            cumulativeTotalEarned += catchupAmt;
+            updateDepositStates();
+          }
+        }
+      }
       continue;
     }
 
@@ -590,19 +627,20 @@ export function generateEventsList(
     if (evt.type === "candidate_level_income") {
       if (isDuplicateOfReal(evt)) continue;
 
-      let maxCandidateAllowed = targetLevelIncome;
-      if (targetLevelIncome > 0) {
-        const remRealLevelIncome = candidateEvents
-          .filter(e => e.type === "real_on_chain" && e.incomeType === "level_income" && e.timestamp >= evt.timestamp)
-          .reduce((s, e) => s + e.amount, 0);
-        maxCandidateAllowed = Math.max(0, targetLevelIncome - remRealLevelIncome);
-      }
+      const totalRealLevelIncome = candidateEvents
+        .filter(e => e.type === "real_on_chain" && e.incomeType === "level_income")
+        .reduce((s, e) => s + e.amount, 0);
+      const maxCandidateAllowed = Math.max(0, targetLevelIncome - totalRealLevelIncome);
 
-      if (targetLevelIncome > 0 && accumulatedLevelIncome >= maxCandidateAllowed - 0.001) continue;
+      const candidateSoFar = generated
+        .filter(e => e.type === "level_income" && (e.isSimulated || !e.txHash || e.txHash.startsWith("0x_gen_")))
+        .reduce((s, e) => s + e.amount, 0);
+
+      if (targetLevelIncome > 0 && candidateSoFar >= maxCandidateAllowed - 0.001) continue;
 
       let amt = evt.amount;
-      if (targetLevelIncome > 0 && accumulatedLevelIncome + amt > maxCandidateAllowed) {
-        amt = maxCandidateAllowed - accumulatedLevelIncome;
+      if (targetLevelIncome > 0 && candidateSoFar + amt > maxCandidateAllowed) {
+        amt = maxCandidateAllowed - candidateSoFar;
       }
       const remNetCap = Math.max(0, maxNetworkCap - cumulativeTotalEarned);
       amt = Math.min(amt, remNetCap);
@@ -674,7 +712,9 @@ export function generateEventsList(
             if (targetDailyROI > 0 && accumulatedDailyROI + roiAmt > targetDailyROI) {
               roiAmt = targetDailyROI - accumulatedDailyROI;
             }
-            const remMilestone = Math.max(0, deposit.roiStopAt - cumulativeTotalEarned);
+            const remMilestone = (targetDailyROI > 0 && accumulatedDailyROI < targetDailyROI)
+              ? targetDailyROI - accumulatedDailyROI
+              : Math.max(0, deposit.roiStopAt - cumulativeTotalEarned);
             const remNetCap = Math.max(0, maxNetworkCap - cumulativeTotalEarned);
             roiAmt = Math.min(roiAmt, remMilestone, remNetCap);
             roiAmt = Math.round(roiAmt * 1e8) / 1e8;
@@ -705,7 +745,9 @@ export function generateEventsList(
             if (targetBoosterROI > 0 && accumulatedBoosterROI + boostAmt > targetBoosterROI) {
               boostAmt = targetBoosterROI - accumulatedBoosterROI;
             }
-            const remMilestone = Math.max(0, deposit.roiStopAt - cumulativeTotalEarned);
+            const remMilestone = (targetBoosterROI > 0 && accumulatedBoosterROI < targetBoosterROI)
+              ? targetBoosterROI - accumulatedBoosterROI
+              : Math.max(0, deposit.roiStopAt - cumulativeTotalEarned);
             const remNetCap = Math.max(0, maxNetworkCap - cumulativeTotalEarned);
             boostAmt = Math.min(boostAmt, remMilestone, remNetCap);
             boostAmt = Math.round(boostAmt * 1e8) / 1e8;
