@@ -861,7 +861,7 @@ export default function Dashboard() {
             directs,
             userDeposits,
             userWithdrawals,
-            simulatedEvents,
+            simResult?.ledger || [],
             sessionTxDetails,
             incomeInfo,
             bonusesMapped
@@ -1557,7 +1557,8 @@ export default function Dashboard() {
 
       if (searchFromUser) {
         const searchStr = searchFromUser.trim().toLowerCase();
-        if (!tx.fromUser.toLowerCase().includes(searchStr)) return false;
+        const fromUserStr = (tx.fromUser || "").toLowerCase();
+        if (!fromUserStr.includes(searchStr)) return false;
       }
 
       return true;

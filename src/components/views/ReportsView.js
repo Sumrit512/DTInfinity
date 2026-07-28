@@ -226,18 +226,26 @@ export default function ReportsView({
                                   tx.type === "roi" ? "tag roi" :
                                     "tag bonus"
                         }>
-                          {tx.typeName}
+                          {tx.typeName || (
+                            tx.type === "deposit" ? "Deposit" :
+                              tx.type === "withdraw" ? "Withdrawal" :
+                                tx.type === "level_income" ? "Level Income" :
+                                  tx.type === "level_roi" ? "Level ROI" :
+                                    tx.type === "roi" ? "Daily ROI" :
+                                      tx.type === "booster_roi" ? "Booster ROI" :
+                                        ["perf_instant", "perf_daily", "perf_claim"].includes(tx.type) ? "Performance Bonus" : "Bonus"
+                          )}
                         </span>
                       </td>
                       <td style={{ padding: "12px 10px", fontSize: "13px" }} className="mono">
-                        {tx.fromUser.length > 10 ? (
+                        {tx.fromUser && tx.fromUser.length > 10 ? (
                           <span title={tx.fromUser} style={{ cursor: "pointer", borderBottom: "1px dashed var(--text-muted)" }} onClick={() => {
                             navigator.clipboard.writeText(tx.fromUser);
                             alert("Address copied!");
                           }}>
                             {shorten(tx.fromUser)}
                           </span>
-                        ) : tx.fromUser}
+                        ) : (tx.fromUser || "-")}
                       </td>
                       <td style={{ padding: "12px 10px", fontSize: "13px", textAlign: "right", fontWeight: "600" }} className={isNegative ? "amt-neg" : "amt-pos"}>
                         {isNegative ? "-" : "+"}{formatTxAmount(tx.amount)} USDT
