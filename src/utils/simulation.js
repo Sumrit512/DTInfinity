@@ -325,18 +325,39 @@ export function generateEventsList(
 
 
 
-  // Generate candidate ROI ticks (every ONE_DAY_SECS from regTime to now)
-  let roiTickDay = 1;
-  while (true) {
-    const payoutTime = regTime + roiTickDay * ONE_DAY_SECS;
-    if (payoutTime > now || roiTickDay > 2000) break;
-    candidateEvents.push({
-      type: "candidate_roi_tick",
-      day: roiTickDay,
-      timestamp: payoutTime,
-      sortPriority: 5
+  const hasRealROI = (onChainEvents || []).some(e => 
+    !e.isSimulated && 
+    (e.type === "roi" || e.type === "booster_roi") &&
+    (!e.user || e.user.toLowerCase() === userAddrLower)
+  );
+
+  if (!hasRealROI) {
+    // Generate candidate ROI ticks at transaction trigger timestamps & fallback interval boundaries
+    const triggerTimesSet = new Set();
+    sortedDeposits.forEach(d => {
+      if (d.timestamp > regTime && d.timestamp <= now) triggerTimesSet.add(d.timestamp);
     });
-    roiTickDay++;
+    if (onChainEvents && onChainEvents.length > 0) {
+      onChainEvents.forEach(e => {
+        if (e.timestamp > regTime && e.timestamp <= now) triggerTimesSet.add(e.timestamp);
+      });
+    }
+    let intervalTick = regTime + ONE_DAY_SECS;
+    while (intervalTick <= now) {
+      triggerTimesSet.add(intervalTick);
+      intervalTick += ONE_DAY_SECS;
+    }
+    triggerTimesSet.add(now);
+
+    const sortedTriggerTimes = Array.from(triggerTimesSet).sort((a, b) => a - b);
+    sortedTriggerTimes.forEach((tTime, idx) => {
+      candidateEvents.push({
+        type: "candidate_roi_tick",
+        day: idx + 1,
+        timestamp: tTime,
+        sortPriority: 5
+      });
+    });
   }
 
   if (localActiveBonuses && localActiveBonuses.length > 0) {
@@ -462,15 +483,11 @@ export function generateEventsList(
     .filter(e => e.type === "perf_daily" && !e.isSimulated && (!e.user || e.user.toLowerCase() === userAddrLower));
   const lastUpdatePerf = realPerfEvents.length > 0 ? Math.max(...realPerfEvents.map(e => e.timestamp)) : regTime;
 
-  // Real events in onChainEvents that directly add to timeline (excluding deposits which are handled via sortedDeposits at line 236, and excluding bulk rollup events)
+  // Real events in onChainEvents that directly add to timeline (excluding deposits which are handled via sortedDeposits)
   const realOnChainEvents = (onChainEvents || []).filter(e => 
     !e.isSimulated &&
     (!e.user || e.user.toLowerCase() === userAddrLower) &&
-    e.type !== "deposit" &&
-    e.type !== "roi" &&
-    e.type !== "booster_roi" &&
-    e.type !== "level_roi" &&
-    e.type !== "perf_daily"
+    e.type !== "deposit"
   );
 
   realOnChainEvents.forEach(e => {
@@ -678,78 +695,69 @@ export function generateEventsList(
     }
 
     if (evt.type === "candidate_roi_tick") {
-      // Iterate through all active deposits where deposit.timestamp <= evt.timestamp and deposit.roiActive === true
+      if (hasRealROI) continue;
       activeDepositsList.forEach((deposit, depIdx) => {
         if (deposit.timestamp > evt.timestamp || !deposit.roiActive) return;
+        if (cumulativeTotalEarned >= maxNetworkCap - 0.0001) return;
 
         const rateBps = depIdx === 0 ? getBoosterRateAtTime(evt.timestamp) : 50;
-        const baseRate = 50;
-        const boosterRate = Math.max(0, rateBps - 50);
+        let accrued = (deposit.amount * rateBps) / 10000;
 
-        // 1. Standard Daily ROI
-        if (baseRate > 0 && deposit.roiActive && cumulativeTotalEarned < maxNetworkCap - 0.0001) {
-          if (targetDailyROI <= 0 || accumulatedDailyROI < targetDailyROI - 0.0001) {
-            let roiAmt = (deposit.amount * baseRate) / 10000;
-            if (targetDailyROI > 0 && accumulatedDailyROI + roiAmt > targetDailyROI) {
-              roiAmt = targetDailyROI - accumulatedDailyROI;
-            }
-            const remMilestone = (targetDailyROI > 0 && accumulatedDailyROI < targetDailyROI)
-              ? targetDailyROI - accumulatedDailyROI
-              : Math.max(0, deposit.roiStopAt - cumulativeTotalEarned);
-            const remNetCap = Math.max(0, maxNetworkCap - cumulativeTotalEarned);
-            roiAmt = Math.min(roiAmt, remMilestone, remNetCap);
-            roiAmt = Math.round(roiAmt * 1e8) / 1e8;
+        const remMilestone = Math.max(0, deposit.roiStopAt - cumulativeTotalEarned);
+        const remNetCap = Math.max(0, maxNetworkCap - cumulativeTotalEarned);
+        let allowed = Math.min(accrued, remMilestone, remNetCap);
 
-            if (roiAmt > 0) {
-              generated.push({
-                type: "roi",
-                typeName: "Daily ROI Payout",
-                fromUser: "Contract",
-                amount: roiAmt,
-                level: "-",
-                timestamp: evt.timestamp,
-                status: "Completed",
-                txHash: `0x_gen_roi_${regTime}_dep${depIdx}_${evt.day}`,
-                blockNumber: 0
-              });
-              accumulatedDailyROI += roiAmt;
-              cumulativeTotalEarned += roiAmt;
-              updateDepositStates();
-            }
-          }
+        if (targetDailyROI > 0) {
+          const remDaily = Math.max(0, targetDailyROI - accumulatedDailyROI);
+          const allowedForDaily = (remDaily * rateBps) / 50;
+          if (allowed > allowedForDaily) allowed = allowedForDaily;
+        }
+        if (targetBoosterROI > 0 && rateBps > 50) {
+          const remBooster = Math.max(0, targetBoosterROI - accumulatedBoosterROI);
+          const allowedForBooster = (remBooster * rateBps) / (rateBps - 50);
+          if (allowed > allowedForBooster) allowed = allowedForBooster;
         }
 
-        // 2. Booster ROI
-        if (boosterRate > 0 && deposit.roiActive && cumulativeTotalEarned < maxNetworkCap - 0.0001) {
-          if (targetBoosterROI <= 0 || accumulatedBoosterROI < targetBoosterROI - 0.0001) {
-            let boostAmt = (deposit.amount * boosterRate) / 100;
-            if (targetBoosterROI > 0 && accumulatedBoosterROI + boostAmt > targetBoosterROI) {
-              boostAmt = targetBoosterROI - accumulatedBoosterROI;
-            }
-            const remMilestone = (targetBoosterROI > 0 && accumulatedBoosterROI < targetBoosterROI)
-              ? targetBoosterROI - accumulatedBoosterROI
-              : Math.max(0, deposit.roiStopAt - cumulativeTotalEarned);
-            const remNetCap = Math.max(0, maxNetworkCap - cumulativeTotalEarned);
-            boostAmt = Math.min(boostAmt, remMilestone, remNetCap);
-            boostAmt = Math.round(boostAmt * 1e8) / 1e8;
+        allowed = Math.round(allowed * 1e8) / 1e8;
 
-            if (boostAmt > 0) {
-              generated.push({
-                type: "booster_roi",
-                typeName: "Booster ROI Yield",
-                fromUser: "Contract",
-                amount: boostAmt,
-                level: "-",
-                timestamp: evt.timestamp,
-                status: "Completed",
-                txHash: `0x_gen_booster_${regTime}_dep${depIdx}_${evt.day}`,
-                blockNumber: 0
-              });
-              accumulatedBoosterROI += boostAmt;
-              cumulativeTotalEarned += boostAmt;
-              updateDepositStates();
-            }
+        if (allowed > 0) {
+          let basePortion = Math.round(((allowed * 50) / rateBps) * 1e8) / 1e8;
+          if (basePortion > allowed) basePortion = allowed;
+          const pDaily = basePortion;
+          const pBooster = Math.round((allowed - basePortion) * 1e8) / 1e8;
+
+          if (pDaily > 0) {
+            generated.push({
+              type: "roi",
+              typeName: "Daily ROI Payout",
+              fromUser: "Contract",
+              amount: pDaily,
+              level: "-",
+              timestamp: evt.timestamp,
+              status: "Completed",
+              txHash: `0x_gen_roi_${regTime}_dep${depIdx}_${evt.day}`,
+              blockNumber: 0
+            });
+            accumulatedDailyROI += pDaily;
           }
+
+          if (pBooster > 0) {
+            generated.push({
+              type: "booster_roi",
+              typeName: "Booster ROI Yield",
+              fromUser: "Contract",
+              amount: pBooster,
+              level: "-",
+              timestamp: evt.timestamp,
+              status: "Completed",
+              txHash: `0x_gen_booster_${regTime}_dep${depIdx}_${evt.day}`,
+              blockNumber: 0
+            });
+            accumulatedBoosterROI += pBooster;
+          }
+
+          cumulativeTotalEarned += (pDaily + pBooster);
+          updateDepositStates();
         }
       });
       continue;
