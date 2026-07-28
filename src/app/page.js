@@ -833,7 +833,7 @@ export default function Dashboard() {
           console.warn("Could not read performance qualifications", e);
         }
 
-        const simulatedEvents = generateEventsList(
+        const simResult = generateEventsList(
           addr,
           Number(basicInfo.registrationTime),
           ethers.formatUnits(basicInfo.totalDeposits || 0n, 18),
@@ -848,9 +848,9 @@ export default function Dashboard() {
           treeNodes,
           bonusesMapped,
           deposits
-        ).map(evt => ({ ...evt, isSimulated: true }));
+        );
 
-        setOnChainEvents([...deposits, ...withdrawals, ...simulatedEvents]);
+        setOnChainEvents(simResult?.ledger || []);
 
         try {
           await syncToConvex(
@@ -1426,37 +1426,27 @@ export default function Dashboard() {
     return list.filter(b => b.tierIndex === undefined || !instantClaimedTiers.has(Number(b.tierIndex)));
   }, [activeBonuses, pendingQualifications, perfOneDay, userData.totalDeposits, userData.registrationTime, userData.totalTeamVolume, lifetimeTeamVolume, secondsSinceSync, dbLedger]);
 
-  const unmergedTxs = useMemo(() => {
+  const simulationResult = useMemo(() => {
     const ledger = dbLedger || [];
     const activeAddress = targetAddressForLedger || walletAddress;
-    if (!activeAddress && ledger.length === 0) return [];
-    const realDeposits = ledger.filter(e => e.type === "deposit");
-    const realWithdrawals = ledger.filter(e => e.type === "withdraw");
-    // Exclude bulk on-chain ROI events and bulk on-chain performance daily events to display every payout independently
-    const realEvents = ledger.filter(e => 
-      e.type !== "deposit" && 
-      e.type !== "withdraw" && 
-      e.type !== "roi" && 
-      e.type !== "booster_roi" && 
-      e.type !== "perf_daily" && 
-      !e.isSimulated && 
-      e.blockNumber && 
-      e.blockNumber > 0 && 
-      e.txHash && 
-      e.txHash.length === 66 && 
-      !e.txHash.includes("_") &&
-      !e.txHash.includes("gen") &&
-      !e.txHash.includes("salary") &&
-      !e.txHash.includes("rem")
-    );
+    if (!activeAddress && ledger.length === 0) {
+      return {
+        success: true,
+        ledger: [],
+        totals: { dailyROI: 0, boosterROI: 0, levelIncome: 0, levelROI: 0, performance: 0, totalEarned: 0 },
+        validation: { isValid: true, errors: [], diffs: { dailyROI: 0, boosterROI: 0, levelIncome: 0, levelROI: 0, performance: 0 } },
+        diagnostics: { generatedTotals: {}, blockchainTotals: {}, categoryDiffs: {}, milestoneViolations: [], capViolations: [], duplicateTxHashes: [], duplicateSimIds: [], chronologicalViolations: [] }
+      };
+    }
 
-    // Dynamically generate simulated candidate events based on live ticking time (every interval separately)
-    const simulatedEvents = generateEventsList(
+    const realDeposits = ledger.filter(e => e.type === "deposit");
+
+    return generateEventsList(
       targetAddressForLedger || walletAddress,
       Number(userData.registrationTime || 0),
       userData.totalDeposits || "0",
-      "0",
-      "0",
+      userData.dailyROIEarned || "0",
+      userData.roiBoosterEarned || "0",
       userData.levelIncomeEarned || "0",
       userData.levelROIEarned || "0",
       userData.performanceBonusEarned || "0",
@@ -1467,84 +1457,34 @@ export default function Dashboard() {
       effectiveActiveBonuses,
       realDeposits,
       ledger
-    ).map(evt => ({ ...evt, isSimulated: true }));
+    );
+  }, [dbLedger, targetAddressForLedger, walletAddress, userData, oneDay, perfOneDay, treeNodes, effectiveActiveBonuses]);
 
-    const baseTxs = [...realEvents, ...realDeposits, ...realWithdrawals];
+  const unmergedTxs = useMemo(() => {
+    const rawLedger = simulationResult?.ledger || [];
+    if (sortOrder === "desc") {
+      return [...rawLedger].reverse();
+    }
+    return rawLedger;
+  }, [simulationResult, sortOrder]);
 
-    simulatedEvents.forEach(sim => {
-      if (sim.type === "roi" || sim.type === "booster_roi" || sim.type === "perf_daily") {
-        baseTxs.push(sim);
-      } else {
-        const normSimType = (sim.type || "").replace("candidate_", "");
-        const isDuplicate = realEvents.some(real => {
-          const normRealType = (real.type || "").replace("candidate_", "");
-          const isSameUser = real.fromUser && sim.fromUser && real.fromUser.toLowerCase() === sim.fromUser.toLowerCase();
-          const isSameLevel = String(real.level) === String(sim.level);
-          return normRealType === normSimType && (isSameUser || (isSameLevel && Math.abs(real.timestamp - sim.timestamp) < 300));
-        });
-        if (!isDuplicate) {
-          baseTxs.push(sim);
-        }
-      }
-    });
-
-    baseTxs.sort((a, b) => {
-      const diff = sortOrder === "asc" ? a.timestamp - b.timestamp : b.timestamp - a.timestamp;
-      if (diff !== 0) return diff;
-      const priorityMapAsc = { roi: 0, booster_roi: 0, level_income: 1, level_roi: 1, deposit: 2, withdraw: 2, perf_daily: 3, perf_instant: 3, perf_claim: 3 };
-      const priorityMapDesc = { perf_daily: 4, perf_instant: 4, perf_claim: 4, roi: 3, booster_roi: 3, level_income: 2, level_roi: 2, withdraw: 1, deposit: 0 };
-      const priorityMap = sortOrder === "asc" ? priorityMapAsc : priorityMapDesc;
-      const prioA = priorityMap[a.type] !== undefined ? priorityMap[a.type] : 1;
-      const prioB = priorityMap[b.type] !== undefined ? priorityMap[b.type] : 1;
-      return prioA - prioB;
-    });
-
-    return baseTxs;
-  }, [dbLedger, walletConnected, isRegistered, sortOrder, userData, oneDay, perfOneDay, treeNodes, effectiveActiveBonuses, secondsSinceSync, walletAddress]);
-
-  const txs = useMemo(() => {
-    return unmergedTxs;
-  }, [unmergedTxs]);
+  const txs = unmergedTxs;
 
   const statsToDisplay = useMemo(() => {
-    let roiFromTxs = 0;
-    let levelIncome = 0;
-    let levelROI = 0;
-    let performance = 0;
-    let perfDailyInContract = 0;
-
-    unmergedTxs.forEach(tx => {
-      if (tx.type === "roi" || tx.type === "booster_roi") {
-        roiFromTxs += tx.amount;
-      } else if (tx.type === "level_income") levelIncome += tx.amount;
-      else if (tx.type === "level_roi") levelROI += tx.amount;
-      else if (["perf_instant", "perf_daily", "perf_claim"].includes(tx.type)) {
-        performance += tx.amount;
-        if (tx.type !== "perf_instant") {
-          perfDailyInContract += tx.amount;
-        }
-      }
-    });
-
-    const totalROIVal = roiFromTxs;
-
-    if (parseFloat(userData.levelIncomeEarned || "0") > levelIncome) {
-      levelIncome = parseFloat(userData.levelIncomeEarned || "0");
-    }
-    if (parseFloat(userData.levelROIEarned || "0") > levelROI) {
-      levelROI = parseFloat(userData.levelROIEarned || "0");
-    }
-    if (parseFloat(userData.performanceBonusEarned || "0") > performance) {
-      performance = parseFloat(userData.performanceBonusEarned || "0");
-    }
+    const dailyROI = parseFloat(userData.dailyROIEarned || "0") + displayPendingDaily;
+    const boosterROI = parseFloat(userData.roiBoosterEarned || "0") + displayPendingBooster;
+    const levelIncome = parseFloat(userData.levelIncomeEarned || "0");
+    const levelROI = parseFloat(userData.levelROIEarned || "0") + displayPendingLevelROI;
+    const performance = parseFloat(userData.performanceBonusEarned || "0") + displayPendingPerf;
+    const totalROIVal = dailyROI + boosterROI;
 
     const totalEarned = Math.min(totalROIVal + levelIncome + levelROI + performance, maxNetworkCap);
     const storedContractClaimable = parseFloat(userData.claimableBalance || "0") + displayPendingDaily + displayPendingBooster + displayPendingPerf + displayPendingLevelROI;
     const claimableInContract = Math.max(0, Math.min(storedContractClaimable, maxNetworkCap));
 
     return {
-      dailyROI: totalROIVal.toFixed(2),
-      boosterROI: "0.00",
+      dailyROI: dailyROI.toFixed(2),
+      boosterROI: boosterROI.toFixed(2),
       levelIncome: levelIncome.toFixed(2),
       levelROI: levelROI.toFixed(2),
       performance: performance.toFixed(2),
@@ -1552,7 +1492,7 @@ export default function Dashboard() {
       totalEarned: totalEarned.toFixed(2),
       totalAvailable: claimableInContract.toFixed(2)
     };
-  }, [unmergedTxs, userData, displayPendingDaily, displayPendingBooster, displayPendingPerf, displayPendingLevelROI, maxNetworkCap]);
+  }, [userData, displayPendingDaily, displayPendingBooster, displayPendingPerf, displayPendingLevelROI, maxNetworkCap]);
 
   const lifetimeTeamVol = useMemo(() => {
     if (!treeNodes || !walletAddress) return parseFloat(userData.totalTeamVolume || "0");
@@ -1834,6 +1774,7 @@ export default function Dashboard() {
 
         {(activeView === "reports" || activeView === "history") && (
           <ReportsView
+            simulationResult={simulationResult}
             filteredTxs={filteredTxs}
             paginatedTxs={paginatedTxs}
             totalSelectedIncome={totalSelectedIncome}

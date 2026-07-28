@@ -30,7 +30,7 @@ export const DT_INFINITY_ABI = [
   "function getUserIncomeInfo(address user) external view returns (uint256 dailyROIEarned, uint256 roiBoosterEarned, uint256 levelIncomeEarned, uint256 levelROIEarned, uint256 performanceBonusEarned)",
   "function getUserNetworkInfo(address user) external view returns (uint256 directCount, uint256 qualifiedDirectsCount, uint256 totalTeamCount, uint256 totalTeamVolume, address strongestLegAddress, uint256 strongestLegVolume)",
   "function getPendingBalances(address userAddr) external view returns (uint256 pendingDaily, uint256 pendingBooster, uint256 pendingPerf)",
-  "function getUserDeposits(address userAddr) external view returns (tuple(uint256 amount, uint256 time)[])",
+  "function getUserDeposits(address userAddr) external view returns (tuple(uint256 amount, uint256 time, uint256 lastUpdateROI, uint256 dailyROIEarned, uint256 roiBoosterEarned, uint256 rateBps, bool isFirstDeposit)[])",
   "function getUserWithdrawals(address userAddr) external view returns (tuple(uint256 amount, uint256 time)[])",
   "function userLegVolume(address sponsor, address directReferral) external view returns (uint256)",
   "function claimPerformanceBonus(uint256 tierIndex, bool chooseInstant) external",

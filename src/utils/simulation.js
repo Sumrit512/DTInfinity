@@ -20,7 +20,15 @@ export function generateEventsList(
   onChainEvents = []
 ) {
   const regTime = Number(registrationTime || 0);
-  if (regTime === 0) return [];
+  if (regTime === 0) {
+    return {
+      success: true,
+      ledger: [],
+      totals: { dailyROI: 0, boosterROI: 0, levelIncome: 0, levelROI: 0, performance: 0, totalEarned: 0 },
+      validation: { isValid: true, errors: [], diffs: { dailyROI: 0, boosterROI: 0, levelIncome: 0, levelROI: 0, performance: 0 } },
+      diagnostics: { generatedTotals: {}, blockchainTotals: {}, categoryDiffs: {}, milestoneViolations: [], capViolations: [], duplicateTxHashes: [], duplicateSimIds: [], chronologicalViolations: [] }
+    };
+  }
 
   const ONE_DAY_SECS = Number(oneDayVal) || 1800;
   const PERF_ONE_DAY_SECS = Number(perfOneDayVal) || 480;
@@ -33,7 +41,7 @@ export function generateEventsList(
       if ((e.type === "perf_claim" || e.type === "perf_claim_option2" || e.type === "perf_instant") && e.tierIndex !== undefined && (!e.user || e.user.toLowerCase() === userAddrLower)) {
         const tier = Number(e.tierIndex);
         const rate = PERFORMANCE_TIERS[tier]?.daily || 5;
-        const exists = localActiveBonuses.some(b => b.tierIndex === tier);
+        const exists = localActiveBonuses.some(b => Math.abs(b.startTime - e.timestamp) < 300);
         if (!exists) {
           localActiveBonuses.push({
             tierIndex: tier,
@@ -216,19 +224,14 @@ export function generateEventsList(
     stepCheck++;
   }
 
-  const targetDailyROI = Math.max(parseFloat(dailyROIEarned) || 0, autoAccruedDailyROI);
-  const targetBoosterROI = Math.max(parseFloat(roiBoosterEarned) || 0, autoAccruedBoosterROI);
+  const targetDailyROI = parseFloat(dailyROIEarned) || 0;
+  const targetBoosterROI = parseFloat(roiBoosterEarned) || 0;
   const targetLevelIncome = parseFloat(levelIncomeEarned) || 0;
   const targetLevelROI = parseFloat(levelROIEarned) || 0;
   const targetPerf = parseFloat(performanceBonusEarned) || 0;
 
   // 3. Build Candidate Event Timeline
   const candidateEvents = [];
-  const fallbackTimeBase = Math.max(
-    regTime,
-    ...(sortedDeposits || []).map(d => d.timestamp || regTime),
-    ...(onChainEvents || []).map(e => e.timestamp || regTime)
-  ) + 60;
 
   sortedDeposits.forEach((dep, idx) => {
     candidateEvents.push({
@@ -290,7 +293,7 @@ export function generateEventsList(
                       amount: Math.round(partAmt * 1e8) / 1e8,
                       level: foundLevel.toString(),
                       timestamp: offsetTime,
-                      sortPriority: 2,
+                      sortPriority: 3,
                       txHash: `0x_gen_lvl_inc_${childAddr.toLowerCase()}_${dIdx}_${offsetTime}_${partIdx}`
                     });
                     candidateLevelIncSum += partAmt;
@@ -306,188 +309,45 @@ export function generateEventsList(
     });
   }
 
-  let totalCandidateLevelIncSum = candidateLevelIncSum;
-  if (onChainEvents && onChainEvents.length > 0) {
-    onChainEvents.forEach(e => {
-      if (!e.isSimulated && e.type === "level_income" && (!e.user || e.user.toLowerCase() === userAddrLower)) {
-        totalCandidateLevelIncSum += typeof e.amount === "number" ? e.amount : parseFloat(e.amount || 0);
-      }
+
+
+  // Generate candidate ROI ticks (every ONE_DAY_SECS from regTime to now)
+  let roiTickDay = 1;
+  while (true) {
+    const payoutTime = regTime + roiTickDay * ONE_DAY_SECS;
+    if (payoutTime > now || roiTickDay > 2000) break;
+    candidateEvents.push({
+      type: "candidate_roi_tick",
+      day: roiTickDay,
+      timestamp: payoutTime,
+      sortPriority: 5
     });
+    roiTickDay++;
   }
-
-  if (targetLevelIncome > 0 && totalCandidateLevelIncSum < targetLevelIncome - 0.01) {
-    const diff = targetLevelIncome - totalCandidateLevelIncSum;
-    let fallbackL1Addr = "Downline";
-    if (treeNodes && Object.keys(treeNodes).length > 0) {
-      const l1Child = Object.keys(treeNodes).find(childAddr => {
-        const node = treeNodes[childAddr];
-        return node.sponsor && node.sponsor.toLowerCase() === addr.toLowerCase();
-      });
-      if (l1Child) {
-        fallbackL1Addr = l1Child;
-      }
-    }
-
-    let remDiff = diff;
-    let incIdx = 0;
-    const maxPerEntry = 500;
-    while (remDiff > 0.001 && incIdx < 100) {
-      const entryAmt = Math.min(maxPerEntry, remDiff);
-      candidateEvents.push({
-        type: "candidate_level_income",
-        typeName: "Level Income",
-        fromUser: fallbackL1Addr,
-        amount: Math.round(entryAmt * 1e8) / 1e8,
-        level: "1",
-        timestamp: fallbackTimeBase + (incIdx * 10),
-        sortPriority: 2,
-        txHash: `0x_gen_lvl_inc_unbundled_${regTime}_${incIdx}`
-      });
-      remDiff = Math.round((remDiff - entryAmt) * 1e8) / 1e8;
-      incIdx++;
-    }
-  }
-
-  const maxRoiSimulationTime = now;
-  sortedDeposits.forEach((dep, depIdx) => {
-    let day = 1;
-    while (true) {
-      const payoutTime = dep.timestamp + day * ONE_DAY_SECS;
-      if (payoutTime > maxRoiSimulationTime || day > 2000) break;
-
-      candidateEvents.push({
-        type: "candidate_roi",
-        depIdx: depIdx,
-        depAmount: dep.amount,
-        depTimestamp: dep.timestamp,
-        isFirstDeposit: depIdx === 0,
-        day: day,
-        timestamp: payoutTime,
-        sortPriority: 3
-      });
-      day++;
-    }
-  });
 
   if (localActiveBonuses && localActiveBonuses.length > 0) {
-    const instantClaimedTiers = new Set();
-    if (onChainEvents && onChainEvents.length > 0) {
-      onChainEvents.forEach(e => {
-        if (e.type === "perf_instant" && (!e.user || e.user.toLowerCase() === userAddrLower)) {
-          if (e.tierIndex !== undefined && e.tierIndex !== null) {
-            instantClaimedTiers.add(Number(e.tierIndex));
-          } else {
-            PERFORMANCE_TIERS.forEach((t, idx) => {
-              if (Math.abs((parseFloat(e.amount) || 0) - t.instant) < 0.01) {
-                instantClaimedTiers.add(idx);
-              }
-            });
-          }
-        }
-      });
-    }
+    localActiveBonuses.forEach((bonus) => {
+      const streamStart = Number(bonus.startTime);
+      const streamEnd = bonus.endTime > 0 ? Number(bonus.endTime) : streamStart + 30 * PERF_ONE_DAY_SECS;
+      const streamId = `${bonus.tierIndex !== undefined ? bonus.tierIndex : '0'}_${streamStart}_${bonus.txHash || bonus.claimTxHash || ""}`;
 
-    const uniqueBonuses = [];
-    localActiveBonuses.forEach(b => {
-      if (b.tierIndex !== undefined && instantClaimedTiers.has(Number(b.tierIndex))) return;
-      const isDup = uniqueBonuses.some(ub => 
-        (ub.tierIndex !== undefined && ub.tierIndex === b.tierIndex) ||
-        Math.abs(ub.startTime - b.startTime) < 300
-      );
-      if (!isDup) uniqueBonuses.push(b);
-    });
-
-    let realPerfSumOnChain = 0;
-    if (onChainEvents && onChainEvents.length > 0) {
-      onChainEvents.forEach(e => {
-        if (e.type === "perf_daily" && !e.isSimulated && (!e.user || e.user.toLowerCase() === userAddrLower)) {
-          realPerfSumOnChain += e.amount;
-        }
-      });
-    }
-
-    let totalMaxAllowedPerf = 0;
-    uniqueBonuses.forEach(b => {
-      totalMaxAllowedPerf += 30 * b.dailyRate;
-    });
-
-    let remainingPerfAmount = totalMaxAllowedPerf;
-    let simulatedCandidatePerfSum = 0;
-
-    uniqueBonuses.forEach((bonus, bIdx) => {
-      if (bonus.tierIndex !== undefined && instantClaimedTiers.has(Number(bonus.tierIndex))) {
-        return;
-      }
-      if (simulatedCandidatePerfSum >= remainingPerfAmount - 0.01) {
-        return;
-      }
-
-      const streamStart = bonus.startTime;
-      const streamEnd = bonus.endTime > 0 ? bonus.endTime : streamStart + 30 * PERF_ONE_DAY_SECS;
-
-      let day = 1;
-      while (true) {
+      for (let day = 1; day <= 30; day++) {
         const salaryTime = streamStart + day * PERF_ONE_DAY_SECS;
-        if (salaryTime > streamEnd || salaryTime > now || day > 30) break;
-
-        if (simulatedCandidatePerfSum + bonus.dailyRate > remainingPerfAmount + 0.01) {
-          break;
-        }
+        if (salaryTime > streamEnd || salaryTime > now) break;
 
         candidateEvents.push({
           type: "candidate_perf_daily",
-          bIdx: bIdx,
+          streamId: streamId,
           day: day,
           dailyRate: bonus.dailyRate,
           startTime: streamStart,
           endTime: streamEnd,
           tierIndex: bonus.tierIndex,
           timestamp: salaryTime,
-          sortPriority: 4
+          sortPriority: 7
         });
-
-        simulatedCandidatePerfSum += bonus.dailyRate;
-        day++;
       }
     });
-  }
-
-  let totalCandidatePerfSum = 0;
-  candidateEvents.forEach(e => {
-    if (e.type === "candidate_perf_daily") totalCandidatePerfSum += (e.dailyRate || 0);
-  });
-  if (onChainEvents && onChainEvents.length > 0) {
-    onChainEvents.forEach(e => {
-      if (!e.isSimulated && (!e.user || e.user.toLowerCase() === userAddrLower)) {
-        if (["perf_instant", "perf_daily", "perf_claim"].includes(e.type)) {
-          totalCandidatePerfSum += typeof e.amount === "number" ? e.amount : parseFloat(e.amount || 0);
-        }
-      }
-    });
-  }
-
-  if (targetPerf > 0 && totalCandidatePerfSum < targetPerf - 0.01) {
-    const diff = targetPerf - totalCandidatePerfSum;
-    let remPerf = diff;
-    let pIdx = 0;
-    const maxPerPerfEntry = 5.0;
-    while (remPerf > 0.001 && pIdx < 100) {
-      const entryAmt = Math.min(maxPerPerfEntry, remPerf);
-      candidateEvents.push({
-        type: "candidate_perf_daily",
-        bIdx: 0,
-        day: pIdx + 31,
-        dailyRate: Math.round(entryAmt * 1e8) / 1e8,
-        startTime: fallbackTimeBase + 4000,
-        endTime: now,
-        tierIndex: 0,
-        timestamp: fallbackTimeBase + 4000 + (pIdx * 10),
-        sortPriority: 2,
-        isFallback: true
-      });
-      remPerf = Math.round((remPerf - entryAmt) * 1e8) / 1e8;
-      pIdx++;
-    }
   }
 
   let candidateLevelROISum = 0;
@@ -522,7 +382,6 @@ export function generateEventsList(
           const parentDepAtTime = getCumulativeDepositAtTime(addr, childRegTime);
           const qualDirectsAtTime = getQualifiedDirectsCountAtTime(addr, childRegTime);
 
-          // Smart contract rule: Child totalDeposits >= 50, Parent totalDeposits >= 50, Parent qualifiedDirectsCount >= foundLevel
           if (childDepAtTime >= 50 && parentDepAtTime >= 50 && qualDirectsAtTime >= foundLevel) {
             const expectedDaily = tDep * 0.005 * (levelROIPct[foundLevel - 1] || 0);
             if (expectedDaily > 0) {
@@ -546,7 +405,7 @@ export function generateEventsList(
           amount: dc.expectedDaily,
           level: dc.level.toString(),
           timestamp: payoutTime,
-          sortPriority: 2,
+          sortPriority: 4,
           txHash: `0x_gen_lvl_roi_${dc.addr.toLowerCase()}_${dayOffset}_${dc.level}`
         });
         candidateLevelROISum += dc.expectedDaily;
@@ -554,56 +413,9 @@ export function generateEventsList(
       dayOffset++;
       iteration++;
     }
-
-    let totalCandidateLevelROISum = candidateLevelROISum;
-    if (onChainEvents && onChainEvents.length > 0) {
-      onChainEvents.forEach(e => {
-        if (!e.isSimulated && e.type === "level_roi" && (!e.user || e.user.toLowerCase() === userAddrLower)) {
-          totalCandidateLevelROISum += typeof e.amount === "number" ? e.amount : parseFloat(e.amount || 0);
-        }
-      });
-    }
-
-    if (totalCandidateLevelROISum < targetLevelROI - 0.01) {
-      const diff = targetLevelROI - totalCandidateLevelROISum;
-      let remLvlRoi = diff;
-      let roiIdx = 0;
-      const maxPerLvlRoiEntry = 2.5;
-      while (remLvlRoi > 0.001 && roiIdx < 100) {
-        const entryAmt = Math.min(maxPerLvlRoiEntry, remLvlRoi);
-        candidateEvents.push({
-          type: "candidate_level_roi",
-          typeName: "Level ROI Matching",
-          fromUser: "Downline",
-          amount: Math.round(entryAmt * 1e8) / 1e8,
-          level: "1",
-          timestamp: fallbackTimeBase + 2000 + (roiIdx * 10),
-          sortPriority: 2,
-          txHash: `0x_gen_lvl_roi_unbundled_${regTime}_${roiIdx}`
-        });
-        remLvlRoi = Math.round((remLvlRoi - entryAmt) * 1e8) / 1e8;
-        roiIdx++;
-      }
-    }
   }
 
-  if (onChainEvents && onChainEvents.length > 0) {
-    onChainEvents.forEach(e => {
-      if (!e.isSimulated && (!e.user || e.user.toLowerCase() === userAddrLower)) {
-        let incType = e.type;
-        if (["perf_claim", "perf_instant", "perf_daily"].includes(e.type)) incType = "perf_daily";
-        candidateEvents.push({
-          type: "on_chain_income",
-          incomeType: incType,
-          amount: typeof e.amount === "number" ? e.amount : parseFloat(e.amount || 0),
-          timestamp: e.timestamp || regTime,
-          sortPriority: 1.5,
-          tierIndex: e.tierIndex
-        });
-      }
-    });
-  }
-
+  // Sort candidateEvents
   candidateEvents.sort((a, b) => {
     if (a.timestamp !== b.timestamp) {
       return a.timestamp - b.timestamp;
@@ -611,6 +423,7 @@ export function generateEventsList(
     return a.sortPriority - b.sortPriority;
   });
 
+  // Replay State
   let currentDeposit = 0;
   let accumulatedDailyROI = 0;
   let accumulatedBoosterROI = 0;
@@ -619,55 +432,183 @@ export function generateEventsList(
   let accumulatedPerf = 0;
   let cumulativeTotalEarned = 0;
 
-  let lastUpdateROI = regTime;
-  let lastUpdateBooster = regTime;
-  let lastUpdatePerf = 0;
-
+  const activeDepositsList = [];
   const generated = [];
-  const depositROIEarnedMap = {};
-  const depositTotalEarnedMap = {};
-  const tierPerfEarnedMap = {};
+  const streamEarnedMap = {}; // Tracks earned amount per active daily performance stream
 
+  const realRoiEvents = (onChainEvents || [])
+    .filter(e => e.type === "roi" && !e.isSimulated && (!e.user || e.user.toLowerCase() === userAddrLower));
+  const lastUpdateROI = realRoiEvents.length > 0 ? Math.max(...realRoiEvents.map(e => e.timestamp)) : regTime;
+
+  const realBoosterEvents = (onChainEvents || [])
+    .filter(e => e.type === "booster_roi" && !e.isSimulated && (!e.user || e.user.toLowerCase() === userAddrLower));
+  const lastUpdateBooster = realBoosterEvents.length > 0 ? Math.max(...realBoosterEvents.map(e => e.timestamp)) : regTime;
+
+  const realPerfEvents = (onChainEvents || [])
+    .filter(e => e.type === "perf_daily" && !e.isSimulated && (!e.user || e.user.toLowerCase() === userAddrLower));
+  const lastUpdatePerf = realPerfEvents.length > 0 ? Math.max(...realPerfEvents.map(e => e.timestamp)) : regTime;
+
+  // Real events in onChainEvents that directly add to timeline
+  const realOnChainEvents = (onChainEvents || []).filter(e => 
+    !e.isSimulated &&
+    (!e.user || e.user.toLowerCase() === userAddrLower)
+  );
+
+  realOnChainEvents.forEach(e => {
+    let priority = 2;
+    if (e.type === "deposit") priority = 1;
+    else if (e.type === "withdraw") priority = 8;
+
+    candidateEvents.push({
+      type: "real_on_chain",
+      incomeType: e.type,
+      amount: e.amount,
+      timestamp: e.timestamp,
+      sortPriority: priority,
+      originalEvent: e
+    });
+  });
+
+  // Push userDeposits only if not already in realOnChainEvents
+  sortedDeposits.forEach((dep) => {
+    const exists = realOnChainEvents.some(r => r.type === "deposit" && (r.txHash === dep.txHash || Math.abs(r.timestamp - dep.timestamp) < 60));
+    if (!exists) {
+      candidateEvents.push({
+        type: "user_deposit",
+        timestamp: dep.timestamp,
+        amount: dep.amount,
+        sortPriority: 1
+      });
+    }
+  });
+
+  // Re-sort everything to ensure strict chronological order with priority
+  candidateEvents.sort((a, b) => {
+    if (a.timestamp !== b.timestamp) {
+      return a.timestamp - b.timestamp;
+    }
+    return a.sortPriority - b.sortPriority;
+  });
+
+  // Helper to check if a candidate event is a duplicate of a real on-chain transaction
+  function isDuplicateOfReal(simEvt) {
+    return (onChainEvents || []).some(real => {
+      if (real.isSimulated) return false;
+
+      if (real.txHash && simEvt.txHash && real.txHash.length === 66 && simEvt.txHash.length === 66 && !real.txHash.includes("_") && !simEvt.txHash.includes("_")) {
+        return real.txHash.toLowerCase() === simEvt.txHash.toLowerCase();
+      }
+
+      const realType = real.type;
+      const simType = simEvt.type.replace("candidate_", "").replace("_tick", "");
+      if (realType !== simType) return false;
+
+      const isSameUser = real.fromUser && simEvt.fromUser && real.fromUser.toLowerCase() === simEvt.fromUser.toLowerCase();
+      const isSameLevel = real.level !== undefined && simEvt.level !== undefined && String(real.level) === String(simEvt.level);
+      const isSameAmount = Math.abs((parseFloat(real.amount) || 0) - (parseFloat(simEvt.amount) || 0)) < 0.01;
+
+      if (realType === "level_income") {
+        return (isSameUser && isSameAmount) || (isSameUser && isSameLevel);
+      }
+
+      return isSameUser && isSameLevel && isSameAmount;
+    });
+  }
+
+  // Helper function to update active/inactive state of deposits
+  function updateDepositStates() {
+    activeDepositsList.forEach(dep => {
+      if (cumulativeTotalEarned >= dep.roiStopAt - 0.0001) {
+        dep.roiActive = false;
+      }
+    });
+  }
+
+  // Process timeline events
   for (const evt of candidateEvents) {
-    if (evt.type === "user_deposit") {
+    const maxNetworkCap = currentDeposit * 4.0;
+
+    if (evt.type === "user_deposit" || evt.type === "deposit") {
+      if (evt.originalEvent) {
+        generated.push(evt.originalEvent);
+      } else {
+        generated.push({
+          type: "deposit",
+          typeName: "Deposit",
+          fromUser: addr,
+          amount: evt.amount,
+          level: "-",
+          timestamp: evt.timestamp,
+          status: "Completed",
+          txHash: evt.txHash || `0x_dep_${evt.timestamp}`,
+          blockNumber: 0
+        });
+      }
       currentDeposit += evt.amount;
+      activeDepositsList.push({
+        amount: evt.amount,
+        timestamp: evt.timestamp,
+        roiStopAt: currentDeposit * 2.2,
+        roiActive: true
+      });
+      updateDepositStates();
       continue;
     }
 
-    if (evt.type === "on_chain_income") {
-      const maxNetNow = currentDeposit * 4.0;
-      const remNetNow = Math.max(0, maxNetNow - cumulativeTotalEarned);
-      const amt = Math.min(evt.amount, remNetNow);
-      if (amt > 0) {
+    if (evt.type === "real_on_chain") {
+      const amt = evt.amount;
+      generated.push(evt.originalEvent);
+
+      if (evt.incomeType === "deposit") {
+        currentDeposit += amt;
+        activeDepositsList.push({
+          amount: amt,
+          timestamp: evt.timestamp,
+          roiStopAt: currentDeposit * 2.2,
+          roiActive: true
+        });
+        updateDepositStates();
+      } else if (evt.incomeType !== "withdraw") {
         cumulativeTotalEarned += amt;
-        if (evt.incomeType === "level_income") accumulatedLevelIncome += amt;
-        else if (evt.incomeType === "level_roi") accumulatedLevelROI += amt;
-        else if (evt.incomeType === "perf_daily") {
+        if (evt.incomeType === "level_income") {
+          accumulatedLevelIncome += amt;
+        } else if (evt.incomeType === "level_roi") {
+          accumulatedLevelROI += amt;
+        } else if (evt.incomeType === "perf_claim" || evt.incomeType === "perf_instant" || evt.incomeType === "perf_daily") {
           accumulatedPerf += amt;
-          const tIdx = evt.tierIndex !== undefined && evt.tierIndex !== null ? Number(evt.tierIndex) : 0;
-          tierPerfEarnedMap[tIdx] = (tierPerfEarnedMap[tIdx] || 0) + amt;
         } else if (evt.incomeType === "roi") {
           accumulatedDailyROI += amt;
         } else if (evt.incomeType === "booster_roi") {
           accumulatedBoosterROI += amt;
         }
+        updateDepositStates();
       }
       continue;
     }
 
-    const maxRoiCap = currentDeposit * 2.2;
-    const maxNetworkCap = currentDeposit * 4.0;
-
-    const remRoiCap = Math.max(0, maxRoiCap - (accumulatedDailyROI + accumulatedBoosterROI));
-    const remNetCap = Math.max(0, maxNetworkCap - cumulativeTotalEarned);
+    // Global cap check
+    if (currentDeposit > 0 && cumulativeTotalEarned >= maxNetworkCap - 0.0001) {
+      continue;
+    }
 
     if (evt.type === "candidate_level_income") {
-      if (targetLevelIncome > 0 && accumulatedLevelIncome >= targetLevelIncome - 0.001) continue;
+      if (isDuplicateOfReal(evt)) continue;
+
+      let maxCandidateAllowed = targetLevelIncome;
+      if (targetLevelIncome > 0) {
+        const remRealLevelIncome = candidateEvents
+          .filter(e => e.type === "real_on_chain" && e.incomeType === "level_income" && e.timestamp >= evt.timestamp)
+          .reduce((s, e) => s + e.amount, 0);
+        maxCandidateAllowed = Math.max(0, targetLevelIncome - remRealLevelIncome);
+      }
+
+      if (targetLevelIncome > 0 && accumulatedLevelIncome >= maxCandidateAllowed - 0.001) continue;
 
       let amt = evt.amount;
-      if (targetLevelIncome > 0 && accumulatedLevelIncome + amt > targetLevelIncome) {
-        amt = targetLevelIncome - accumulatedLevelIncome;
+      if (targetLevelIncome > 0 && accumulatedLevelIncome + amt > maxCandidateAllowed) {
+        amt = maxCandidateAllowed - accumulatedLevelIncome;
       }
+      const remNetCap = Math.max(0, maxNetworkCap - cumulativeTotalEarned);
       amt = Math.min(amt, remNetCap);
       amt = Math.round(amt * 1e8) / 1e8;
 
@@ -685,22 +626,20 @@ export function generateEventsList(
         });
         accumulatedLevelIncome += amt;
         cumulativeTotalEarned += amt;
-        sortedDeposits.forEach((dep, depIdx) => {
-          if (evt.timestamp >= dep.timestamp) {
-            depositTotalEarnedMap[depIdx] = (depositTotalEarnedMap[depIdx] || 0) + amt;
-          }
-        });
+        updateDepositStates();
       }
       continue;
     }
 
     if (evt.type === "candidate_level_roi") {
+      if (isDuplicateOfReal(evt)) continue;
       if (targetLevelROI > 0 && accumulatedLevelROI >= targetLevelROI - 0.001) continue;
 
       let amt = evt.amount;
       if (targetLevelROI > 0 && accumulatedLevelROI + amt > targetLevelROI) {
         amt = targetLevelROI - accumulatedLevelROI;
       }
+      const remNetCap = Math.max(0, maxNetworkCap - cumulativeTotalEarned);
       amt = Math.min(amt, remNetCap);
       amt = Math.round(amt * 1e8) / 1e8;
 
@@ -718,99 +657,102 @@ export function generateEventsList(
         });
         accumulatedLevelROI += amt;
         cumulativeTotalEarned += amt;
-        sortedDeposits.forEach((dep, depIdx) => {
-          if (evt.timestamp >= dep.timestamp) {
-            depositTotalEarnedMap[depIdx] = (depositTotalEarnedMap[depIdx] || 0) + amt;
-          }
-        });
+        updateDepositStates();
       }
       continue;
     }
 
-    if (evt.type === "candidate_roi") {
-      const depIdx = evt.depIdx;
-      const depAmount = evt.depAmount;
-      const depCumAmount = sortedDeposits.slice(0, depIdx + 1).reduce((sum, d) => sum + d.amount, 0);
-      const depMaxCap = depCumAmount * 2.2;
-      const activeTotalDeposit = sortedDeposits.filter(d => d.timestamp <= evt.timestamp).reduce((sum, d) => sum + d.amount, 0);
-      const maxNetworkCapNow = activeTotalDeposit * 4.0;
+    if (evt.type === "candidate_roi_tick") {
+      // Iterate through all active deposits where deposit.timestamp <= evt.timestamp and deposit.roiActive === true
+      activeDepositsList.forEach((deposit, depIdx) => {
+        if (deposit.timestamp > evt.timestamp || !deposit.roiActive) return;
 
-      const hasAnchoredEvt = generated.some(g => 
-        g.type === "roi" && 
-        g.txHash && g.txHash.includes(`_dep${depIdx}`) &&
-        Math.abs(g.timestamp - evt.timestamp) < 300
-      );
+        const rateBps = depIdx === 0 ? getBoosterRateAtTime(evt.timestamp) : 50;
+        const baseRate = 50;
+        const boosterRate = Math.max(0, rateBps - 50);
 
-      if (hasAnchoredEvt) {
-        continue;
-      }
+        // 1. Standard Daily ROI
+        if (baseRate > 0 && deposit.roiActive && cumulativeTotalEarned < maxNetworkCap - 0.0001) {
+          if (targetDailyROI <= 0 || accumulatedDailyROI < targetDailyROI - 0.0001) {
+            let roiAmt = (deposit.amount * baseRate) / 10000;
+            if (targetDailyROI > 0 && accumulatedDailyROI + roiAmt > targetDailyROI) {
+              roiAmt = targetDailyROI - accumulatedDailyROI;
+            }
+            const remMilestone = Math.max(0, deposit.roiStopAt - cumulativeTotalEarned);
+            const remNetCap = Math.max(0, maxNetworkCap - cumulativeTotalEarned);
+            roiAmt = Math.min(roiAmt, remMilestone, remNetCap);
+            roiAmt = Math.round(roiAmt * 1e8) / 1e8;
 
-      if (cumulativeTotalEarned < depMaxCap - 0.0001 && cumulativeTotalEarned < maxNetworkCapNow - 0.0001) {
-        // Booster ROI applies ONLY to First Deposit (evt.isFirstDeposit / depIdx === 0)
-        const rateBps = evt.isFirstDeposit ? getBoosterRateAtTime(evt.timestamp) : 50;
-
-        const isFutureRoi = evt.timestamp > lastUpdateROI;
-        if (isFutureRoi || targetDailyROI === 0 || accumulatedDailyROI < targetDailyROI - 0.0001) {
-          let roiAmt = (depAmount * rateBps) / 10000;
-          if (!isFutureRoi && targetDailyROI > 0 && accumulatedDailyROI + roiAmt > targetDailyROI) {
-            roiAmt = targetDailyROI - accumulatedDailyROI;
-          }
-          const curRemDepCap = Math.max(0, depMaxCap - cumulativeTotalEarned);
-          const curRemNetCap = Math.max(0, maxNetworkCapNow - cumulativeTotalEarned);
-          roiAmt = Math.min(roiAmt, curRemDepCap, curRemNetCap);
-          roiAmt = Math.round(roiAmt * 1e8) / 1e8;
-
-          if (roiAmt > 0) {
-            generated.push({
-              type: "roi",
-              typeName: "Daily ROI Payout",
-              fromUser: "Contract",
-              amount: roiAmt,
-              level: "-",
-              timestamp: evt.timestamp,
-              status: "Completed",
-              txHash: `0x_gen_roi_${regTime}_dep${depIdx}_${evt.day}`,
-              blockNumber: 0
-            });
-            depositROIEarnedMap[depIdx] = (depositROIEarnedMap[depIdx] || 0) + roiAmt;
-            sortedDeposits.forEach((dep, dIdx) => {
-              if (evt.timestamp >= dep.timestamp) {
-                depositTotalEarnedMap[dIdx] = (depositTotalEarnedMap[dIdx] || 0) + roiAmt;
-              }
-            });
-            accumulatedDailyROI += roiAmt;
-            cumulativeTotalEarned += roiAmt;
+            if (roiAmt > 0) {
+              generated.push({
+                type: "roi",
+                typeName: "Daily ROI Payout",
+                fromUser: "Contract",
+                amount: roiAmt,
+                level: "-",
+                timestamp: evt.timestamp,
+                status: "Completed",
+                txHash: `0x_gen_roi_${regTime}_dep${depIdx}_${evt.day}`,
+                blockNumber: 0
+              });
+              accumulatedDailyROI += roiAmt;
+              cumulativeTotalEarned += roiAmt;
+              updateDepositStates();
+            }
           }
         }
-      }
+
+        // 2. Booster ROI
+        if (boosterRate > 0 && deposit.roiActive && cumulativeTotalEarned < maxNetworkCap - 0.0001) {
+          if (targetBoosterROI <= 0 || accumulatedBoosterROI < targetBoosterROI - 0.0001) {
+            let boostAmt = (deposit.amount * boosterRate) / 100;
+            if (targetBoosterROI > 0 && accumulatedBoosterROI + boostAmt > targetBoosterROI) {
+              boostAmt = targetBoosterROI - accumulatedBoosterROI;
+            }
+            const remMilestone = Math.max(0, deposit.roiStopAt - cumulativeTotalEarned);
+            const remNetCap = Math.max(0, maxNetworkCap - cumulativeTotalEarned);
+            boostAmt = Math.min(boostAmt, remMilestone, remNetCap);
+            boostAmt = Math.round(boostAmt * 1e8) / 1e8;
+
+            if (boostAmt > 0) {
+              generated.push({
+                type: "booster_roi",
+                typeName: "Booster ROI Yield",
+                fromUser: "Contract",
+                amount: boostAmt,
+                level: "-",
+                timestamp: evt.timestamp,
+                status: "Completed",
+                txHash: `0x_gen_booster_${regTime}_dep${depIdx}_${evt.day}`,
+                blockNumber: 0
+              });
+              accumulatedBoosterROI += boostAmt;
+              cumulativeTotalEarned += boostAmt;
+              updateDepositStates();
+            }
+          }
+        }
+      });
       continue;
     }
 
     if (evt.type === "candidate_perf_daily") {
-      const tIdx = evt.tierIndex !== undefined ? Number(evt.tierIndex) : 0;
-      const tierMaxAllowed = evt.isFallback ? targetPerf : 30 * evt.dailyRate;
-      const tierEarned = tierPerfEarnedMap[tIdx] || 0;
-      if (tierEarned >= tierMaxAllowed - 0.001) continue;
+      if (isDuplicateOfReal(evt)) continue;
+      const maxCap = 30 * evt.dailyRate;
+      const streamEarned = streamEarnedMap[evt.streamId] || 0;
+      if (streamEarned >= maxCap - 0.001) continue;
 
-      const hasAnchoredEvt = generated.some(g => 
-        g.type === "perf_daily" && 
-        Math.abs(g.timestamp - evt.timestamp) < 200
-      );
-      if (hasAnchoredEvt) continue;
-
-      if (evt.timestamp > now) continue;
-      if (targetPerf > 0 && accumulatedPerf >= targetPerf - 0.001) continue;
+      if (targetPerf > 0 && accumulatedPerf >= targetPerf - 0.0001) continue;
 
       let amt = evt.dailyRate;
-      const remTierCap = Math.max(0, tierMaxAllowed - tierEarned);
-      if (amt > remTierCap) amt = remTierCap;
+      const remStreamCap = Math.max(0, maxCap - streamEarned);
+      amt = Math.min(amt, remStreamCap);
 
       if (targetPerf > 0 && accumulatedPerf + amt > targetPerf) {
         amt = targetPerf - accumulatedPerf;
       }
-
-      const curRemNetCap = Math.max(0, maxNetworkCap - cumulativeTotalEarned);
-      amt = Math.min(amt, curRemNetCap);
+      const remNetCap = Math.max(0, maxNetworkCap - cumulativeTotalEarned);
+      amt = Math.min(amt, remNetCap);
       amt = Math.round(amt * 1e8) / 1e8;
 
       if (amt > 0) {
@@ -826,17 +768,104 @@ export function generateEventsList(
           blockNumber: 0,
           tierIndex: evt.tierIndex
         });
-        tierPerfEarnedMap[tIdx] = (tierPerfEarnedMap[tIdx] || 0) + amt;
         accumulatedPerf += amt;
         cumulativeTotalEarned += amt;
+        streamEarnedMap[evt.streamId] = streamEarned + amt;
+        updateDepositStates();
       }
       continue;
     }
   }
 
+  // Exhaustive Validation & Diagnostics
+  const genDailyROI = Math.round(generated.filter(e => e.type === "roi").reduce((s, e) => s + e.amount, 0) * 1e8) / 1e8;
+  const genBoosterROI = Math.round(generated.filter(e => e.type === "booster_roi").reduce((s, e) => s + e.amount, 0) * 1e8) / 1e8;
+  const genLevelInc = Math.round(generated.filter(e => e.type === "level_income").reduce((s, e) => s + e.amount, 0) * 1e8) / 1e8;
+  const genLevelROI = Math.round(generated.filter(e => e.type === "level_roi").reduce((s, e) => s + e.amount, 0) * 1e8) / 1e8;
+  const genPerf = Math.round(generated.filter(e => e.type === "perf_daily" || e.type === "perf_instant" || e.type === "perf_claim").reduce((s, e) => s + e.amount, 0) * 1e8) / 1e8;
+  const genTotalEarned = Math.round((genDailyROI + genBoosterROI + genLevelInc + genLevelROI + genPerf) * 1e8) / 1e8;
 
+  const diffDailyROI = Math.round(Math.abs(genDailyROI - targetDailyROI) * 1e8) / 1e8;
+  const diffBoosterROI = Math.round(Math.abs(genBoosterROI - targetBoosterROI) * 1e8) / 1e8;
+  const diffLevelInc = Math.round(Math.abs(genLevelInc - targetLevelIncome) * 1e8) / 1e8;
+  const diffLevelROI = Math.round(Math.abs(genLevelROI - targetLevelROI) * 1e8) / 1e8;
+  const diffPerf = Math.round(Math.abs(genPerf - targetPerf) * 1e8) / 1e8;
 
-  return generated;
+  const validationErrors = [];
+  if (targetDailyROI > 0 && diffDailyROI > 0.05) {
+    validationErrors.push(`Daily ROI mismatch. Generated: ${genDailyROI}, Blockchain Target: ${targetDailyROI}, Difference: ${diffDailyROI}`);
+  }
+  if (targetBoosterROI > 0 && diffBoosterROI > 0.05) {
+    validationErrors.push(`Booster ROI mismatch. Generated: ${genBoosterROI}, Blockchain Target: ${targetBoosterROI}, Difference: ${diffBoosterROI}`);
+  }
+  if (targetLevelIncome > 0 && diffLevelInc > 0.05) {
+    validationErrors.push(`Level Income mismatch. Generated: ${genLevelInc}, Blockchain Target: ${targetLevelIncome}, Difference: ${diffLevelInc}`);
+  }
+  if (targetLevelROI > 0 && diffLevelROI > 0.05) {
+    validationErrors.push(`Level ROI mismatch. Generated: ${genLevelROI}, Blockchain Target: ${targetLevelROI}, Difference: ${diffLevelROI}`);
+  }
+  if (targetPerf > 0 && diffPerf > 0.05) {
+    validationErrors.push(`Performance Bonus mismatch. Generated: ${genPerf}, Blockchain Target: ${targetPerf}, Difference: ${diffPerf}`);
+  }
+
+  // Duplicate txHash check (checking for duplicate event types under the same real txHash)
+  const txHashTypeCounts = {};
+  const duplicateTxHashes = [];
+  generated.forEach(e => {
+    if (e.txHash && !e.txHash.includes("_")) {
+      const key = `${e.txHash}_${e.type}_${e.amount}_${e.fromUser || ''}`;
+      txHashTypeCounts[key] = (txHashTypeCounts[key] || 0) + 1;
+      if (txHashTypeCounts[key] > 1 && !duplicateTxHashes.includes(e.txHash)) {
+        duplicateTxHashes.push(e.txHash);
+        validationErrors.push(`Duplicate transaction hash detected: ${e.txHash}`);
+      }
+    }
+  });
+
+  // Chronological order check
+  const chronologicalViolations = [];
+  for (let i = 1; i < generated.length; i++) {
+    if (generated[i].timestamp < generated[i - 1].timestamp) {
+      chronologicalViolations.push(`Chronological violation at index ${i}: timestamp ${generated[i].timestamp} < ${generated[i - 1].timestamp}`);
+      validationErrors.push(`Chronological timestamp sequence violation at index ${i}`);
+    }
+  }
+
+  const isValid = validationErrors.length === 0;
+
+  return {
+    success: isValid,
+    ledger: generated,
+    totals: {
+      dailyROI: genDailyROI,
+      boosterROI: genBoosterROI,
+      levelIncome: genLevelInc,
+      levelROI: genLevelROI,
+      performance: genPerf,
+      totalEarned: genTotalEarned
+    },
+    validation: {
+      isValid: isValid,
+      errors: validationErrors,
+      diffs: {
+        dailyROI: diffDailyROI,
+        boosterROI: diffBoosterROI,
+        levelIncome: diffLevelInc,
+        levelROI: diffLevelROI,
+        performance: diffPerf
+      }
+    },
+    diagnostics: {
+      generatedTotals: { dailyROI: genDailyROI, boosterROI: genBoosterROI, levelIncome: genLevelInc, levelROI: genLevelROI, performance: genPerf },
+      blockchainTotals: { dailyROI: targetDailyROI, boosterROI: targetBoosterROI, levelIncome: targetLevelIncome, levelROI: targetLevelROI, performance: targetPerf },
+      categoryDiffs: { dailyROI: diffDailyROI, boosterROI: diffBoosterROI, levelIncome: diffLevelInc, levelROI: diffLevelROI, performance: diffPerf },
+      milestoneViolations: [],
+      capViolations: [],
+      duplicateTxHashes: duplicateTxHashes,
+      duplicateSimIds: [],
+      chronologicalViolations: chronologicalViolations
+    }
+  };
 }
 
 export function generateSimulatedLedger(addr, basicInfo, incomeInfo, directs, currentOneDayVal, loadedDirectsMap = {}, userDeposits = [], currentPerfOneDayVal = 86400n, activeBonuses = []) {
