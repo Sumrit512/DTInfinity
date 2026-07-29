@@ -21,7 +21,8 @@ import {
   shorten
 } from "../utils/formatters.js";
 import {
-  generateEventsList
+  generateEventsList,
+  calculateLedgerROITotal
 } from "../utils/simulation.js";
 
 // Modular UI Components
@@ -1471,12 +1472,15 @@ export default function Dashboard() {
   const txs = unmergedTxs;
 
   const statsToDisplay = useMemo(() => {
-    const dailyROI = parseFloat(userData.dailyROIEarned || "0") + displayPendingDaily;
-    const boosterROI = parseFloat(userData.roiBoosterEarned || "0") + displayPendingBooster;
+    const roiLedgerTotals = calculateLedgerROITotal(txs);
+
+    const dailyROI = roiLedgerTotals.dailyROI;
+    const boosterROI = roiLedgerTotals.boosterROI;
+    const totalROIVal = roiLedgerTotals.totalROI;
+
     const levelIncome = parseFloat(userData.levelIncomeEarned || "0");
     const levelROI = parseFloat(userData.levelROIEarned || "0") + displayPendingLevelROI;
     const performance = parseFloat(userData.performanceBonusEarned || "0") + displayPendingPerf;
-    const totalROIVal = dailyROI + boosterROI;
 
     const totalEarned = Math.min(totalROIVal + levelIncome + levelROI + performance, maxNetworkCap);
     const storedContractClaimable = parseFloat(userData.claimableBalance || "0") + displayPendingDaily + displayPendingBooster + displayPendingPerf + displayPendingLevelROI;
@@ -1492,7 +1496,7 @@ export default function Dashboard() {
       totalEarned: totalEarned.toFixed(2),
       totalAvailable: claimableInContract.toFixed(2)
     };
-  }, [userData, displayPendingDaily, displayPendingBooster, displayPendingPerf, displayPendingLevelROI, maxNetworkCap]);
+  }, [txs, userData, displayPendingDaily, displayPendingBooster, displayPendingPerf, displayPendingLevelROI, maxNetworkCap]);
 
   const lifetimeTeamVol = useMemo(() => {
     if (!treeNodes || !walletAddress) return parseFloat(userData.totalTeamVolume || "0");

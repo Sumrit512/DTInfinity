@@ -2,6 +2,26 @@ import { ethers } from "ethers";
 import { PERFORMANCE_TIERS } from "../constants/abis.js";
 import { safeFloat } from "./formatters.js";
 
+export function calculateLedgerROITotal(ledger) {
+  const list = ledger || [];
+  const dailyROI = list
+    .filter(tx => tx.type === "roi" && tx.amount > 0)
+    .reduce((sum, tx) => sum + (tx.amount || 0), 0);
+  const boosterROI = list
+    .filter(tx => tx.type === "booster_roi" && tx.amount > 0)
+    .reduce((sum, tx) => sum + (tx.amount || 0), 0);
+
+  const roundedDaily = Math.round(dailyROI * 1e8) / 1e8;
+  const roundedBooster = Math.round(boosterROI * 1e8) / 1e8;
+  const roundedTotal = Math.round((dailyROI + boosterROI) * 1e8) / 1e8;
+
+  return {
+    dailyROI: roundedDaily,
+    boosterROI: roundedBooster,
+    totalROI: roundedTotal
+  };
+}
+
 export function generateEventsList(
   addr,
   registrationTime,
