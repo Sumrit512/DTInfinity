@@ -37,6 +37,7 @@ export const DT_INFINITY_ABI = [
   "function pendingTiers(address user, uint256 index) external view returns (bool)",
   "function pendingTierCappedAtStart(address user, uint256 index) external view returns (bool)",
   "function qualificationMonth(address user, uint256 index) external view returns (uint256)",
+  "function getPendingPerformanceQualifications(address userAddr) external view returns (tuple(uint256 tierIndex, uint256 target, uint256 instant, uint256 daily, bool isPending, uint256 claimTime, bool isClaimWindowActive)[])",
   "function getDashboardStats(address user) external view returns (tuple(uint256 dailyROIEarned, uint256 boosterROIEarned, uint256 totalROIEarned, uint256 levelIncomeEarned, uint256 levelROIEarned, uint256 performanceBonusEarned, uint256 pendingDailyROI, uint256 pendingBoosterROI, uint256 pendingPerformanceBonus, uint256 dashboardROI, uint256 dashboardPerformanceBonus, uint256 claimableBalance, uint256 dashboardClaimableBalance, uint256 totalEarned, uint256 roiCap, uint256 roiUsed, uint256 roiRemaining, uint256 roiPercentUsed, uint256 networkCap, uint256 networkUsed, uint256 networkRemaining, uint256 networkPercentUsed))",
   "event Registered(address indexed user, address indexed sponsor, uint256 time)",
   "event Deposited(address indexed user, uint256 amount, uint256 time)",

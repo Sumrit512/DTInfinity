@@ -529,10 +529,18 @@ export default function Dashboard() {
 
   // Single canonical function for fetching pending performance qualifications from smart contract
   async function refreshPendingQualifications(addr) {
-    if (!addr || !window.ethereum) return;
+    if (!addr || !dtInfinityAddress || !window.ethereum) return;
+    if (!ethers.isAddress(dtInfinityAddress)) return;
     try {
       const provider = new ethers.BrowserProvider(window.ethereum);
       const dtContract = new ethers.Contract(dtInfinityAddress, DT_INFINITY_ABI, provider);
+      
+      if (!dtContract?.getPendingPerformanceQualifications || typeof dtContract.getPendingPerformanceQualifications !== "function") {
+        console.warn("[PerfBonus] getPendingPerformanceQualifications not available on contract instance");
+        setPendingQualifications([]);
+        return;
+      }
+
       const rawList = await dtContract.getPendingPerformanceQualifications(addr);
 
       const mapped = (rawList || []).map(q => ({

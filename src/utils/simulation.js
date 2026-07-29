@@ -354,6 +354,10 @@ export function generateEventsList(
     .filter(e => !e.isSimulated && e.type === "booster_roi" && (!e.user || e.user.toLowerCase() === userAddrLower))
     .sort((a, b) => a.timestamp - b.timestamp);
 
+  const maxRealRoiTime = realRoiEventsSorted.length > 0
+    ? Math.max(...realRoiEventsSorted.map(e => Number(e.timestamp)))
+    : 0;
+
   sortedDeposits.forEach((dep, depIdx) => {
     let intervalTick = dep.timestamp + ONE_DAY_SECS;
     let day = 1;
@@ -733,20 +737,47 @@ export function generateEventsList(
       if (!deposit || deposit.timestamp > evt.timestamp || !deposit.roiActive) continue;
       if (cumulativeTotalEarned >= maxNetworkCap - 0.0001) continue;
 
-      const rateBps = evt.depositIndex === 0 ? getBoosterRateAtTime(evt.timestamp) : 50;
-      let accrued = (deposit.amount * rateBps) / 10000;
+      const isHistorical = evt.timestamp <= maxRealRoiTime;
+
+      // Base daily ROI rate per 1-day interval is 0.5% (50 bps)
+      const baseRateBps = 50;
+      let boosterRateBps = 0;
+      let matchedBoosterTxHash = evt.boosterTxHash;
+
+      if (evt.depositIndex === 0) {
+        if (isHistorical) {
+          // Rule 2: For historical ticks, check whether a real blockchain Booster ROI event exists for this tick
+          const realBoosterMatch = realBoosterEventsSorted.find(e =>
+            !e._consumed && Math.abs(e.timestamp - evt.timestamp) <= (ONE_DAY_SECS / 2)
+          );
+          if (realBoosterMatch) {
+            realBoosterMatch._consumed = true;
+            boosterRateBps = Math.round((realBoosterMatch.amount * 10000) / deposit.amount);
+            if (boosterRateBps <= 0) boosterRateBps = 50; // Fallback if exact BPS calculation rounds down
+            matchedBoosterTxHash = realBoosterMatch.txHash || matchedBoosterTxHash;
+          }
+          // If no real booster event exists, boosterRateBps remains 0. (Do NOT call getBoosterRateAtTime)
+        } else {
+          // Rule 3: For future simulation ticks, calculate booster rate using getBoosterRateAtTime
+          const rateBps = getBoosterRateAtTime(evt.timestamp);
+          if (rateBps > 50) {
+            boosterRateBps = rateBps - 50;
+          }
+        }
+      }
+
+      const totalRateBps = baseRateBps + boosterRateBps;
+      let accrued = (deposit.amount * totalRateBps) / 10000;
 
       const remMilestone = Math.max(0, deposit.roiStopAt - cumulativeTotalEarned);
       const remNetCap = Math.max(0, maxNetworkCap - cumulativeTotalEarned);
       let allowed = Math.min(accrued, remMilestone, remNetCap);
-
       allowed = Math.round(allowed * 1e8) / 1e8;
 
       if (allowed > 0) {
-        let basePortion = Math.round(((allowed * 50) / rateBps) * 1e8) / 1e8;
-        if (basePortion > allowed) basePortion = allowed;
-        const pDaily = basePortion;
-        const pBooster = Math.round((allowed - basePortion) * 1e8) / 1e8;
+        let pDaily = Math.round(((allowed * baseRateBps) / totalRateBps) * 1e8) / 1e8;
+        if (pDaily > allowed) pDaily = allowed;
+        const pBooster = Math.round((allowed - pDaily) * 1e8) / 1e8;
 
         if (pDaily > 0) {
           generated.push({
@@ -772,7 +803,7 @@ export function generateEventsList(
             level: "-",
             timestamp: evt.timestamp,
             status: "Completed",
-            txHash: evt.boosterTxHash || `0x_gen_booster_${deposit.timestamp}_dep${evt.depositIndex}_${evt.day}`,
+            txHash: matchedBoosterTxHash || `0x_gen_booster_${deposit.timestamp}_dep${evt.depositIndex}_${evt.day}`,
             blockNumber: 0
           });
           accumulatedBoosterROI += pBooster;
