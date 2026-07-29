@@ -401,7 +401,7 @@ export function generateEventsList(
 
       for (let day = 1; day <= 30; day++) {
         const salaryTime = streamStart + day * PERF_ONE_DAY_SECS;
-        if (salaryTime > streamEnd || salaryTime > now) break;
+        if (salaryTime > streamEnd) break;
 
         candidateEvents.push({
           type: "candidate_perf_daily",

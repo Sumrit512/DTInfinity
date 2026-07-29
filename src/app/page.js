@@ -778,25 +778,27 @@ export default function Dashboard() {
 
         let bonusesMapped = [];
         try {
-          const bonuses = await dtContract.getActiveBonuses(addr);
-          bonusesMapped = bonuses.map(b => {
-            const dailyRateVal = parseFloat(ethers.formatUnits(b.dailyRate || 0n, 18));
-            let tierIndex = 0;
-            for (let t = 0; t < PERFORMANCE_TIERS.length; t++) {
-              if (Math.abs(PERFORMANCE_TIERS[t].daily - dailyRateVal) < 0.1) {
-                tierIndex = t;
-                break;
+          if (typeof dtContract.getActiveBonuses === "function") {
+            const bonuses = await dtContract.getActiveBonuses(addr);
+            bonusesMapped = (bonuses || []).map(b => {
+              const dailyRateVal = parseFloat(ethers.formatUnits(b.dailyRate || 0n, 18));
+              let tierIndex = 0;
+              for (let t = 0; t < PERFORMANCE_TIERS.length; t++) {
+                if (Math.abs(PERFORMANCE_TIERS[t].daily - dailyRateVal) < 0.1) {
+                  tierIndex = t;
+                  break;
+                }
               }
-            }
-            return {
-              tierIndex,
-              dailyRate: dailyRateVal,
-              startTime: Number(b.startTime || 0n),
-              endTime: Number(b.endTime || 0n),
-              lastClaimTime: Number(b.lastClaimTime || 0n)
-            };
-          });
-          setActiveBonuses(bonusesMapped);
+              return {
+                tierIndex,
+                dailyRate: dailyRateVal,
+                startTime: Number(b.startTime || 0n),
+                endTime: Number(b.endTime || 0n),
+                lastClaimTime: Number(b.lastClaimTime || 0n)
+              };
+            });
+            setActiveBonuses(bonusesMapped);
+          }
         } catch (e) {
           console.warn("Could not read active bonuses", e);
         }
@@ -811,7 +813,7 @@ export default function Dashboard() {
           ethers.formatUnits((incomeInfo.roiBoosterEarned || 0n) + (pending.pendingBooster || 0n), 18),
           ethers.formatUnits(incomeInfo.levelIncomeEarned || 0n, 18),
           ethers.formatUnits(incomeInfo.levelROIEarned || 0n, 18),
-          ethers.formatUnits(incomeInfo.performanceBonusEarned || 0n, 18),
+          ethers.formatUnits((incomeInfo.performanceBonusEarned || 0n) + (pending.pendingPerf || 0n), 18),
           Number(boosterRate) / 100,
           Number(currentOneDayVal),
           Number(currentPerfOneDayVal),
@@ -1355,7 +1357,7 @@ export default function Dashboard() {
       userData.roiBoosterEarned || "0",
       userData.levelIncomeEarned || "0",
       userData.levelROIEarned || "0",
-      userData.performanceBonusEarned || "0",
+      (parseFloat(userData.performanceBonusEarned || "0") + displayPendingPerf).toString(),
       parseFloat(userData.boosterRate || "0.5"),
       Number(oneDay || 1800n),
       Number(perfOneDay || 480n),
@@ -1379,6 +1381,14 @@ export default function Dashboard() {
   const statsToDisplay = useMemo(() => {
     if (userData?.dashboardStats) {
       const s = userData.dashboardStats;
+      const calculatedTotalEarned = (
+        parseFloat(s.dashboardROI || "0") +
+        parseFloat(s.levelIncomeEarned || "0") +
+        parseFloat(s.levelROIEarned || "0") +
+        parseFloat(s.performanceBonusEarned || "0") +
+        parseFloat(s.pendingPerformanceBonus || "0")
+      ).toFixed(2);
+
       return {
         dailyROI: s.dailyROIEarned,
         boosterROI: s.boosterROIEarned,
@@ -1387,7 +1397,7 @@ export default function Dashboard() {
         performance: s.performanceBonusEarned,
         pendingPerformance: s.pendingPerformanceBonus,
         totalROI: s.dashboardROI,
-        totalEarned: s.totalEarned,
+        totalEarned: calculatedTotalEarned,
         totalAvailable: s.dashboardClaimableBalance,
         roiCap: s.roiCap,
         roiUsed: s.roiUsed,
@@ -1410,7 +1420,7 @@ export default function Dashboard() {
     const levelROI = parseFloat(userData.levelROIEarned || "0") + displayPendingLevelROI;
     const performance = parseFloat(userData.performanceBonusEarned || "0");
 
-    const totalEarned = Math.min(totalROIVal + levelIncome + levelROI + performance, maxNetworkCap);
+    const totalEarned = (totalROIVal + levelIncome + levelROI + performance + displayPendingPerf).toFixed(2);
     const storedContractClaimable = parseFloat(userData.claimableBalance || "0") + displayPendingDaily + displayPendingBooster + displayPendingPerf + displayPendingLevelROI;
     const claimableInContract = Math.max(0, Math.min(storedContractClaimable, maxNetworkCap));
 
@@ -1422,7 +1432,7 @@ export default function Dashboard() {
       performance: performance.toFixed(2),
       pendingPerformance: displayPendingPerf.toFixed(2),
       totalROI: totalROIVal.toFixed(2),
-      totalEarned: totalEarned.toFixed(2),
+      totalEarned: totalEarned,
       totalAvailable: claimableInContract.toFixed(2)
     };
   }, [txs, userData, displayPendingDaily, displayPendingBooster, displayPendingPerf, displayPendingLevelROI, maxNetworkCap]);
@@ -1455,7 +1465,13 @@ export default function Dashboard() {
   }, [treeNodes, walletAddress, userData.totalTeamVolume]);
 
   const totalAvailableBalance = parseFloat(statsToDisplay.totalAvailable).toFixed(2);
-  const totalEarnedAcrossStreams = parseFloat(statsToDisplay.totalEarned).toFixed(2);
+  const totalEarnedAcrossStreams = (
+    parseFloat(statsToDisplay.totalROI || "0") +
+    parseFloat(statsToDisplay.levelIncome || "0") +
+    parseFloat(statsToDisplay.levelROI || "0") +
+    parseFloat(statsToDisplay.performance || "0") +
+    parseFloat(statsToDisplay.pendingPerformance || "0")
+  ).toFixed(2);
   const currentRoiEarned = parseFloat(statsToDisplay.roiUsed || statsToDisplay.totalEarned || "0");
   const roiCapPercent = statsToDisplay.roiPercentUsed !== undefined
     ? parseFloat(statsToDisplay.roiPercentUsed)
