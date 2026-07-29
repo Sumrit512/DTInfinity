@@ -1,5 +1,5 @@
 // Default contract addresses (placeholders that user can update in settings)
-export const DEFAULT_DT_INFINITY_ADDRESS = "0x880b77ca5B01B4595739264Af4D052Fd4e02a208";
+export const DEFAULT_DT_INFINITY_ADDRESS = "0xD00c01EE56C3695976721043Ca18FaA1c0df9107";
 export const DEFAULT_USDT_ADDRESS = "0x5e2893770f10106BAD262939d9275463Ce333f46";
 
 // Simple USDT ABI
@@ -46,7 +46,7 @@ export const DT_INFINITY_ABI = [
   "event LevelIncomePaid(address indexed upline, address indexed downline, uint256 level, uint256 amount, uint256 time)",
   "event LevelROIPaid(address indexed upline, address indexed downline, uint256 level, uint256 amount, uint256 time)",
   "event PerformanceBonusAchieved(address indexed user, uint256 tierIndex, uint256 instantReward, uint256 time)",
-  "event PerformanceBonusClaimed(address indexed user, uint256 tierIndex, bool chooseInstant, uint256 time)",
+  "event PerformanceBonusClaimed(address indexed user, uint256 tierIndex, bool chooseInstant, uint256 processedTime, uint256 streamStartTime, uint256 streamEndTime, uint256 dailyRate)",
   "event ROIAccumulated(address indexed user, uint256 amount, uint256 time)",
   "event BoosterROIAccumulated(address indexed user, uint256 amount, uint256 time)",
   "event PerformanceDailyPaid(address indexed user, uint256 amount, uint256 time)"

@@ -198,10 +198,10 @@ export function generateEventsList(
     if (e.type === 'perf_claim') {
       const tierIdx = e.tierIndex !== undefined ? Number(e.tierIndex) : (e.originalEvent?.tierIndex !== undefined ? Number(e.originalEvent.tierIndex) : 0);
       
-      const exactStartTime = Number(e.startTime !== undefined ? e.startTime : (e.originalEvent?.startTime !== undefined ? e.originalEvent.startTime : e.timestamp));
-      const exactLastClaimTime = Number(e.lastClaimTime !== undefined ? e.lastClaimTime : (e.originalEvent?.lastClaimTime !== undefined ? e.originalEvent.lastClaimTime : exactStartTime));
+      const exactStartTime = Number(e.streamStartTime !== undefined ? e.streamStartTime : (e.originalEvent?.streamStartTime !== undefined ? e.originalEvent.streamStartTime : (e.startTime !== undefined ? e.startTime : (e.originalEvent?.startTime !== undefined ? e.originalEvent.startTime : e.timestamp))));
+      const exactLastClaimTime = exactStartTime;
       const dailyRate = e.dailyRate !== undefined ? e.dailyRate : (e.originalEvent?.dailyRate !== undefined ? e.originalEvent.dailyRate : (PERFORMANCE_TIERS[tierIdx]?.daily || 5));
-      const exactEndTime = Number(e.endTime !== undefined ? e.endTime : (e.originalEvent?.endTime !== undefined ? e.originalEvent.endTime : exactStartTime + 30 * PERF_ONE_DAY_SECS));
+      const exactEndTime = Number(e.streamEndTime !== undefined ? e.streamEndTime : (e.originalEvent?.streamEndTime !== undefined ? e.originalEvent.streamEndTime : (e.endTime !== undefined ? e.endTime : (e.originalEvent?.endTime !== undefined ? e.originalEvent.endTime : exactStartTime + 30 * PERF_ONE_DAY_SECS))));
 
       const streamId = `${tierIdx}_${exactStartTime}`;
       
@@ -471,6 +471,7 @@ export function generateEventsList(
       bonus.accumulatedAmount += amt;
       bonus.accumulatedDays += 1;
       bonus.nextTick = timestamp + PERF_ONE_DAY_SECS;
+      bonus.lastClaimTime = timestamp;
       cumulativeTotalEarned += amt;
       
       let actualSimulated = isSimulated;

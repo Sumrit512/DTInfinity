@@ -961,7 +961,10 @@ export default function Dashboard() {
               fromUser: "contract",
               amount: actualAmount,
               level: "-",
-              timestamp: Number(parsed.args.time),
+              timestamp: Number(parsed.args.processedTime !== undefined ? parsed.args.processedTime : parsed.args.time),
+              streamStartTime: parsed.args.streamStartTime ? Number(parsed.args.streamStartTime) : undefined,
+              streamEndTime: parsed.args.streamEndTime ? Number(parsed.args.streamEndTime) : undefined,
+              dailyRate: parsed.args.dailyRate ? Number(parsed.args.dailyRate) : undefined,
               status: "Completed",
               txHash,
               blockNumber,
@@ -1289,10 +1292,10 @@ export default function Dashboard() {
         const rate = PERFORMANCE_TIERS[tier]?.daily || 5;
         list.push({
           tierIndex: tier,
-          dailyRate: rate,
-          startTime: e.timestamp,
-          endTime: e.timestamp + 30 * Number(perfOneDay),
-          lastClaimTime: e.timestamp
+          dailyRate: e.dailyRate !== undefined ? e.dailyRate : rate,
+          startTime: e.streamStartTime !== undefined ? e.streamStartTime : e.timestamp,
+          endTime: e.streamEndTime !== undefined ? e.streamEndTime : e.timestamp + 30 * Number(perfOneDay),
+          lastClaimTime: e.streamStartTime !== undefined ? e.streamStartTime : e.timestamp
         });
       }
     });
