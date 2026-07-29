@@ -52,7 +52,7 @@ export default function DashboardView({
   const currentMonthVol = parseFloat(userData?.totalTeamVolume || "0");
 
   const validQualifications = (pendingQualifications || []).filter(qual => {
-    const endClaimTime = Number(qual.claimTime) + Number(perfOneDay || 86400n);
+    const endClaimTime = Number(qual.claimTime) + Number(perfOneDay);
     const isExpired = nowUnix >= endClaimTime;
     return !isExpired;
   });
@@ -96,7 +96,7 @@ export default function DashboardView({
                 minute: '2-digit'
               });
               const claimTimeNum = Number(qual.claimTime);
-              const endClaimTime = claimTimeNum + Number(perfOneDay || 86400n);
+              const endClaimTime = claimTimeNum + Number(perfOneDay);
               const isClaimWindowActive = nowUnix >= claimTimeNum && nowUnix < endClaimTime;
               const timeLeft = Math.max(0, endClaimTime - nowUnix);
               const timeUntilActivation = Math.max(0, claimTimeNum - nowUnix);

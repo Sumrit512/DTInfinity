@@ -168,8 +168,8 @@ export default function Dashboard() {
   const dbLedger = useQuery(api.events.getLedger, targetAddressForLedger ? {
     contractAddress: dtInfinityAddress,
     address: targetAddressForLedger,
-    currentOneDayVal: Number(oneDay || 86400n),
-    currentPerfOneDayVal: Number(perfOneDay || 86400n),
+    currentOneDayVal: Number(oneDay),
+    currentPerfOneDayVal: Number(perfOneDay),
     levelIncomeEarned: parseFloat(userData.levelIncomeEarned || "0"),
     levelROIEarned: parseFloat(userData.levelROIEarned || "0"),
     performanceBonusEarned: parseFloat(userData.performanceBonusEarned || "0"),
@@ -1266,10 +1266,15 @@ export default function Dashboard() {
     });
 
     const list = [];
+    const seenTiers = new Set();
+
     (activeBonuses || []).forEach(b => {
       if (b.tierIndex !== undefined && instantClaimedTiers.has(Number(b.tierIndex))) return;
+      const tierKey = b.tierIndex !== undefined ? Number(b.tierIndex) : null;
+      if (tierKey !== null && seenTiers.has(tierKey)) return;
+      if (tierKey !== null) seenTiers.add(tierKey);
+
       const isDup = list.some(existing =>
-        (existing.tierIndex !== undefined && existing.tierIndex === b.tierIndex) ||
         Math.abs(existing.startTime - b.startTime) < 300
       );
       if (!isDup) list.push(b);
@@ -1279,18 +1284,16 @@ export default function Dashboard() {
     (dbLedger || []).forEach(e => {
       if (e.type === "perf_claim" && e.tierIndex !== undefined) {
         const tier = Number(e.tierIndex);
-        if (instantClaimedTiers.has(tier)) return;
+        if (instantClaimedTiers.has(tier) || seenTiers.has(tier)) return;
+        seenTiers.add(tier);
         const rate = PERFORMANCE_TIERS[tier]?.daily || 5;
-        const exists = list.some(b => b.tierIndex === tier);
-        if (!exists) {
-          list.push({
-            tierIndex: tier,
-            dailyRate: rate,
-            startTime: e.timestamp,
-            endTime: e.timestamp + 30 * (Number(perfOneDay || 86400n)),
-            lastClaimTime: e.timestamp
-          });
-        }
+        list.push({
+          tierIndex: tier,
+          dailyRate: rate,
+          startTime: e.timestamp,
+          endTime: e.timestamp + 30 * Number(perfOneDay),
+          lastClaimTime: e.timestamp
+        });
       }
     });
 
@@ -1310,23 +1313,19 @@ export default function Dashboard() {
 
     (pendingQualifications || []).forEach(qual => {
       const claimTimeNum = Number(qual.claimTime);
-      const endClaimTime = claimTimeNum + Number(perfOneDay || 60n);
+      const endClaimTime = claimTimeNum + Number(perfOneDay);
       const isExpired = nowUnix >= endClaimTime;
       if (isExpired && !qual.isCappedAtStart && userDepNum >= 50) {
-        if (!instantClaimedTiers.has(qual.tierIndex)) {
-          const exists = list.some(b =>
-            (b.tierIndex !== undefined && b.tierIndex === qual.tierIndex) ||
-            Math.abs(b.startTime - claimTimeNum) < 300
-          );
-          if (!exists) {
-            list.push({
-              tierIndex: qual.tierIndex,
-              dailyRate: PERFORMANCE_TIERS[qual.tierIndex].daily,
-              startTime: claimTimeNum,
-              endTime: claimTimeNum + 30 * Number(perfOneDay || 60n),
-              lastClaimTime: claimTimeNum
-            });
-          }
+        const tier = Number(qual.tierIndex);
+        if (!instantClaimedTiers.has(tier) && !seenTiers.has(tier)) {
+          seenTiers.add(tier);
+          list.push({
+            tierIndex: tier,
+            dailyRate: PERFORMANCE_TIERS[tier].daily,
+            startTime: claimTimeNum,
+            endTime: claimTimeNum + 30 * Number(perfOneDay),
+            lastClaimTime: claimTimeNum
+          });
         }
       }
     });
@@ -1359,8 +1358,8 @@ export default function Dashboard() {
       userData.levelROIEarned || "0",
       (parseFloat(userData.performanceBonusEarned || "0") + displayPendingPerf).toString(),
       parseFloat(userData.boosterRate || "0.5"),
-      Number(oneDay || 1800n),
-      Number(perfOneDay || 480n),
+      Number(oneDay),
+      Number(perfOneDay),
       treeNodes,
       effectiveActiveBonuses,
       realDeposits,
