@@ -394,8 +394,12 @@ export function generateEventsList(
     });
   }
 
+  const realLevelROIEvents = (onChainEvents || [])
+    .filter(e => !e.isSimulated && e.type === "level_roi" && (!e.user || e.user.toLowerCase() === userAddrLower));
+  const hasRealLevelROI = realLevelROIEvents.length > 0;
+
   let candidateLevelROISum = 0;
-  if (targetLevelROI > 0 && treeNodes) {
+  if (targetLevelROI > 0 && treeNodes && !hasRealLevelROI) {
     const downlineContributions = [];
     const levelROIPct = [
       0.15, 0.10, 0.05, 0.05, 0.05,
@@ -675,13 +679,12 @@ export function generateEventsList(
     }
 
     if (evt.type === "candidate_level_roi") {
+      if (hasRealLevelROI) continue;
       if (isDuplicateOfReal(evt)) continue;
       if (targetLevelROI > 0 && accumulatedLevelROI >= targetLevelROI - 0.001) continue;
 
       let amt = evt.amount;
-      if (targetLevelROI > 0 && accumulatedLevelROI + amt > targetLevelROI) {
-        amt = targetLevelROI - accumulatedLevelROI;
-      }
+
       const remNetCap = Math.max(0, maxNetworkCap - cumulativeTotalEarned);
       amt = Math.min(amt, remNetCap);
       amt = Math.round(amt * 1e8) / 1e8;
