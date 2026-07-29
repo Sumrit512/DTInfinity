@@ -527,44 +527,27 @@ export default function Dashboard() {
     }
   }
 
-  // Lightweight periodic re-check of performance tier pending state (every 10s).
-  // This ensures the claim window timer appears without needing a full page reload.
-  // Uses a small interval to catch the 120-second claim window in test mode.
+  // Single canonical function for fetching pending performance qualifications from smart contract
   async function refreshPendingQualifications(addr) {
     if (!addr || !window.ethereum) return;
     try {
       const provider = new ethers.BrowserProvider(window.ethereum);
       const dtContract = new ethers.Contract(dtInfinityAddress, DT_INFINITY_ABI, provider);
-      let currentPerfOneDayVal = 120n;
-      try { currentPerfOneDayVal = await dtContract.PERF_ONE_DAY(); } catch (_) { }
+      const rawList = await dtContract.getPendingPerformanceQualifications(addr);
 
-      const qualifications = [];
-      const nowUnix = Math.floor(Date.now() / 1000);
-      for (let t = 0; t < 6; t++) {
-        const isPending = await dtContract.pendingTiers(addr, t);
-        if (isPending) {
-          const isCappedAtStart = await dtContract.pendingTierCappedAtStart(addr, t);
-          if (isCappedAtStart) continue; // Skip ineligible capped qualification
+      const mapped = (rawList || []).map(q => ({
+        tierIndex: Number(q.tierIndex),
+        target: Number(ethers.formatUnits(q.target || 0n, 18)),
+        instant: Number(ethers.formatUnits(q.instant || 0n, 18)),
+        daily: Number(ethers.formatUnits(q.daily || 0n, 18)),
+        isPending: Boolean(q.isPending),
+        claimTime: Number(q.claimTime),
+        isClaimWindowActive: Boolean(q.isClaimWindowActive)
+      }));
 
-          const claimTime = await dtContract.qualificationMonth(addr, t);
-          const claimTimeNum = Number(claimTime);
-          const endClaimTime = claimTimeNum + Number(currentPerfOneDayVal);
-          const isClaimWindowActive = nowUnix >= claimTimeNum && nowUnix < endClaimTime;
-          qualifications.push({
-            tierIndex: t,
-            target: PERFORMANCE_TIERS[t].target,
-            instant: PERFORMANCE_TIERS[t].instant,
-            daily: PERFORMANCE_TIERS[t].daily,
-            isPending,
-            claimTime: claimTimeNum,
-            isClaimWindowActive,
-            isCappedAtStart
-          });
-        }
-      }
-      setPendingQualifications(qualifications);
-      if (qualifications.length > 0) {
-        console.log("[PerfBonus] Qualifications loaded:", qualifications);
+      setPendingQualifications(mapped);
+      if (mapped.length > 0) {
+        console.log("[PerfBonus] Qualifications loaded from getPendingPerformanceQualifications:", mapped);
       }
     } catch (e) {
       console.error("[PerfBonus] refreshPendingQualifications error:", e);
@@ -573,13 +556,15 @@ export default function Dashboard() {
 
   // Auto-refresh pending qualifications every 10 seconds so timer appears live
   useEffect(() => {
-    if (!walletConnected || !isRegistered || !walletAddress) return;
+    if (!walletConnected || !isRegistered || !walletAddress) {
+      setPendingQualifications([]);
+      return;
+    }
     refreshPendingQualifications(walletAddress);
     const interval = setInterval(() => {
       refreshPendingQualifications(walletAddress);
     }, 10000);
     return () => clearInterval(interval);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [walletConnected, isRegistered, walletAddress, dtInfinityAddress]);
 
   async function loadBlockchainData(addr, sessionTxDetails = null) {
@@ -808,64 +793,7 @@ export default function Dashboard() {
           console.warn("Could not read active bonuses", e);
         }
 
-        let qualifications = [];
-        try {
-          const nowUnix = Math.floor(Date.now() / 1000);
-          const userDepNum = parseFloat(ethers.formatUnits(basicInfo.totalDeposits || 0n, 18));
-          const maxNetCap = userDepNum * 4.0;
-          const totEarnedOnChain = parseFloat(formatUSDT(incomeInfo.dailyROIEarned)) +
-            parseFloat(formatUSDT(incomeInfo.roiBoosterEarned)) +
-            parseFloat(formatUSDT(incomeInfo.levelIncomeEarned)) +
-            parseFloat(formatUSDT(incomeInfo.levelROIEarned)) +
-            parseFloat(formatUSDT(incomeInfo.performanceBonusEarned));
-          const isUserCappedOnChain = userDepNum > 0 && totEarnedOnChain >= maxNetCap - 0.001;
-
-          if (!isUserCappedOnChain) {
-            for (let t = 0; t < 6; t++) {
-              const isPending = await dtContract.pendingTiers(addr, t);
-              if (isPending) {
-                const isCappedAtStart = await dtContract.pendingTierCappedAtStart(addr, t);
-                if (isCappedAtStart) continue; // Skip ineligible capped qualification
-
-                const claimTime = await dtContract.qualificationMonth(addr, t);
-                const claimTimeNum = Number(claimTime);
-                const endClaimTime = claimTimeNum + Number(currentPerfOneDayVal || 86400n);
-                const isClaimWindowActive = nowUnix >= claimTimeNum && nowUnix < endClaimTime;
-                const isExpired = nowUnix >= endClaimTime;
-
-                if (isExpired && !isCappedAtStart && userDepNum >= 50) {
-                  const hasExistingBonus = bonusesMapped.some(b => b.tierIndex === t);
-                  if (!hasExistingBonus) {
-                    bonusesMapped.push({
-                      tierIndex: t,
-                      dailyRate: PERFORMANCE_TIERS[t].daily,
-                      startTime: claimTimeNum,
-                      endTime: claimTimeNum + 30 * Number(currentPerfOneDayVal || 86400n),
-                      lastClaimTime: claimTimeNum,
-                      isDefaultedExpired: true
-                    });
-                  }
-                }
-
-                qualifications.push({
-                  tierIndex: t,
-                  target: PERFORMANCE_TIERS[t].target,
-                  instant: PERFORMANCE_TIERS[t].instant,
-                  daily: PERFORMANCE_TIERS[t].daily,
-                  isPending,
-                  claimTime: claimTimeNum,
-                  isClaimWindowActive,
-                  isExpired,
-                  isCappedAtStart
-                });
-              }
-            }
-          }
-          setActiveBonuses([...bonusesMapped]);
-          setPendingQualifications(qualifications);
-        } catch (e) {
-          console.warn("Could not read performance qualifications", e);
-        }
+        await refreshPendingQualifications(addr);
 
         const simResult = generateEventsList(
           addr,
@@ -1393,72 +1321,8 @@ export default function Dashboard() {
       }
     });
 
-    // Fallback: If team volume meets Tier target and user meets leg requirements (strongLeg >= target && otherLegs >= target)
-    let calculatedStrongLeg = 0;
-    let calculatedTotalVol = 0;
-    if (walletAddress && dbTreeNodes) {
-      const rootLower = walletAddress.toLowerCase();
-      const directAddrs = (dbTreeNodes[rootLower]?.children) || [];
-      const legVolumes = [];
-
-      directAddrs.forEach(childAddr => {
-        let legSum = 0;
-        const queue = [childAddr.toLowerCase()];
-        const visited = new Set(queue);
-        while (queue.length > 0) {
-          const current = queue.shift();
-          const node = dbTreeNodes[current];
-          if (node) {
-            legSum += parseFloat(node.totalDeposits || 0);
-            (node.children || []).forEach(subChild => {
-              const subLower = subChild.toLowerCase();
-              if (!visited.has(subLower)) {
-                visited.add(subLower);
-                queue.push(subLower);
-              }
-            });
-          }
-        }
-        legVolumes.push(legSum);
-      });
-
-      if (legVolumes.length > 0) {
-        calculatedStrongLeg = Math.max(...legVolumes);
-        calculatedTotalVol = legVolumes.reduce((a, b) => a + b, 0);
-      }
-    }
-
-    const strongLeg = Math.max(parseFloat(userData.strongestLegVolume || "0"), calculatedStrongLeg);
-    const totalVol = Math.max(parseFloat(userData.totalTeamVolume || "0"), calculatedTotalVol, lifetimeTeamVolume || 0);
-    const otherLegs = Math.max(0, totalVol - strongLeg);
-
-    if (userDepNum >= 50 && regTimeNum > 0 && list.length === 0) {
-      let highestQualifiedIdx = -1;
-      PERFORMANCE_TIERS.forEach((tier, tIdx) => {
-        if (!instantClaimedTiers.has(tIdx)) {
-          if (strongLeg >= tier.target && otherLegs >= tier.target) {
-            highestQualifiedIdx = tIdx;
-          }
-        }
-      });
-
-      if (highestQualifiedIdx >= 0 && !instantClaimedTiers.has(highestQualifiedIdx)) {
-        const tier = PERFORMANCE_TIERS[highestQualifiedIdx];
-        const qualClaimTime = (pendingQualifications && pendingQualifications.length > 0 && Number(pendingQualifications[0].claimTime) > 0)
-          ? Number(pendingQualifications[0].claimTime)
-          : 1784773800;
-        list.push({
-          tierIndex: highestQualifiedIdx,
-          dailyRate: tier.daily,
-          startTime: qualClaimTime,
-          endTime: qualClaimTime + 30 * Number(perfOneDay || 60n),
-          lastClaimTime: qualClaimTime
-        });
-      }
-    }
-
     return list.filter(b => b.tierIndex === undefined || !instantClaimedTiers.has(Number(b.tierIndex)));
-  }, [activeBonuses, pendingQualifications, perfOneDay, userData.totalDeposits, userData.registrationTime, userData.totalTeamVolume, lifetimeTeamVolume, secondsSinceSync, dbLedger]);
+  }, [activeBonuses, pendingQualifications, perfOneDay, userData.totalDeposits, userData.registrationTime, dbLedger]);
 
   const simulationResult = useMemo(() => {
     const ledger = dbLedger || [];
