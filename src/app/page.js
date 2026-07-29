@@ -616,6 +616,15 @@ export default function Dashboard() {
       setIsRegistered(registered);
 
       if (registered) {
+        let dashStats = null;
+        try {
+          if (dtContract.getDashboardStats) {
+            dashStats = await dtContract.getDashboardStats(addr);
+          }
+        } catch (e) {
+          console.warn("getDashboardStats error/not available:", e);
+        }
+
         const [basicInfo, incomeInfo, networkInfo] = await Promise.all([
           dtContract.getUserBasicInfo(addr),
           dtContract.getUserIncomeInfo(addr),
@@ -643,7 +652,31 @@ export default function Dashboard() {
           totalTeamVolume: formatUSDT(networkInfo.totalTeamVolume),
           strongestLegAddress: networkInfo.strongestLegAddress,
           strongestLegVolume: formatUSDT(networkInfo.strongestLegVolume),
-          boosterRate: (Number(boosterRate) / 100).toFixed(1) + "%"
+          boosterRate: (Number(boosterRate) / 100).toFixed(1) + "%",
+          dashboardStats: dashStats ? {
+            dailyROIEarned: formatUSDT(dashStats.dailyROIEarned),
+            boosterROIEarned: formatUSDT(dashStats.boosterROIEarned),
+            totalROIEarned: formatUSDT(dashStats.totalROIEarned),
+            levelIncomeEarned: formatUSDT(dashStats.levelIncomeEarned),
+            levelROIEarned: formatUSDT(dashStats.levelROIEarned),
+            performanceBonusEarned: formatUSDT(dashStats.performanceBonusEarned),
+            pendingDailyROI: formatUSDT(dashStats.pendingDailyROI),
+            pendingBoosterROI: formatUSDT(dashStats.pendingBoosterROI),
+            pendingPerformanceBonus: formatUSDT(dashStats.pendingPerformanceBonus),
+            dashboardROI: formatUSDT(dashStats.dashboardROI),
+            dashboardPerformanceBonus: formatUSDT(dashStats.dashboardPerformanceBonus),
+            claimableBalance: formatUSDT(dashStats.claimableBalance),
+            dashboardClaimableBalance: formatUSDT(dashStats.dashboardClaimableBalance),
+            totalEarned: formatUSDT(dashStats.totalEarned),
+            roiCap: formatUSDT(dashStats.roiCap),
+            roiUsed: formatUSDT(dashStats.roiUsed),
+            roiRemaining: formatUSDT(dashStats.roiRemaining),
+            roiPercentUsed: (Number(dashStats.roiPercentUsed) / 100).toFixed(1),
+            networkCap: formatUSDT(dashStats.networkCap),
+            networkUsed: formatUSDT(dashStats.networkUsed),
+            networkRemaining: formatUSDT(dashStats.networkRemaining),
+            networkPercentUsed: (Number(dashStats.networkPercentUsed) / 100).toFixed(1)
+          } : null
         });
 
         setTreeRoot(addr);
@@ -1472,6 +1505,29 @@ export default function Dashboard() {
   const txs = unmergedTxs;
 
   const statsToDisplay = useMemo(() => {
+    if (userData?.dashboardStats) {
+      const s = userData.dashboardStats;
+      return {
+        dailyROI: s.dailyROIEarned,
+        boosterROI: s.boosterROIEarned,
+        levelIncome: s.levelIncomeEarned,
+        levelROI: s.levelROIEarned,
+        performance: s.performanceBonusEarned,
+        pendingPerformance: s.pendingPerformanceBonus,
+        totalROI: s.dashboardROI,
+        totalEarned: s.totalEarned,
+        totalAvailable: s.dashboardClaimableBalance,
+        roiCap: s.roiCap,
+        roiUsed: s.roiUsed,
+        roiRemaining: s.roiRemaining,
+        roiPercentUsed: s.roiPercentUsed,
+        networkCap: s.networkCap,
+        networkUsed: s.networkUsed,
+        networkRemaining: s.networkRemaining,
+        networkPercentUsed: s.networkPercentUsed
+      };
+    }
+
     const roiLedgerTotals = calculateLedgerROITotal(txs);
 
     const dailyROI = roiLedgerTotals.dailyROI;
@@ -1480,7 +1536,7 @@ export default function Dashboard() {
 
     const levelIncome = parseFloat(userData.levelIncomeEarned || "0");
     const levelROI = parseFloat(userData.levelROIEarned || "0") + displayPendingLevelROI;
-    const performance = parseFloat(userData.performanceBonusEarned || "0") + displayPendingPerf;
+    const performance = parseFloat(userData.performanceBonusEarned || "0");
 
     const totalEarned = Math.min(totalROIVal + levelIncome + levelROI + performance, maxNetworkCap);
     const storedContractClaimable = parseFloat(userData.claimableBalance || "0") + displayPendingDaily + displayPendingBooster + displayPendingPerf + displayPendingLevelROI;
@@ -1492,6 +1548,7 @@ export default function Dashboard() {
       levelIncome: levelIncome.toFixed(2),
       levelROI: levelROI.toFixed(2),
       performance: performance.toFixed(2),
+      pendingPerformance: displayPendingPerf.toFixed(2),
       totalROI: totalROIVal.toFixed(2),
       totalEarned: totalEarned.toFixed(2),
       totalAvailable: claimableInContract.toFixed(2)
@@ -1527,10 +1584,14 @@ export default function Dashboard() {
 
   const totalAvailableBalance = parseFloat(statsToDisplay.totalAvailable).toFixed(2);
   const totalEarnedAcrossStreams = parseFloat(statsToDisplay.totalEarned).toFixed(2);
-  const currentRoiEarned = parseFloat(statsToDisplay.totalEarned);
-  const roiCapPercent = maxRoiCap > 0 ? Math.min((currentRoiEarned / maxRoiCap) * 100, 100) : 0;
-  const currentNetworkEarned = parseFloat(statsToDisplay.totalEarned);
-  const networkCapPercent = maxNetworkCap > 0 ? Math.min((currentNetworkEarned / maxNetworkCap) * 100, 100) : 0;
+  const currentRoiEarned = parseFloat(statsToDisplay.roiUsed || statsToDisplay.totalEarned || "0");
+  const roiCapPercent = statsToDisplay.roiPercentUsed !== undefined
+    ? parseFloat(statsToDisplay.roiPercentUsed)
+    : (maxRoiCap > 0 ? Math.min((currentRoiEarned / maxRoiCap) * 100, 100) : 0);
+  const currentNetworkEarned = parseFloat(statsToDisplay.networkUsed || statsToDisplay.totalEarned || "0");
+  const networkCapPercent = statsToDisplay.networkPercentUsed !== undefined
+    ? parseFloat(statsToDisplay.networkPercentUsed)
+    : (maxNetworkCap > 0 ? Math.min((currentNetworkEarned / maxNetworkCap) * 100, 100) : 0);
 
   const filteredTxs = useMemo(() => {
     return txs.filter(tx => {

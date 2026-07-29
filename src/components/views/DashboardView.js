@@ -278,6 +278,11 @@ export default function DashboardView({
             <div className="icon">🏆</div>
             <div className="name">Performance Bonus</div>
             <div className="amt" style={{ color: "var(--blue-bright)" }}>{statsToDisplay.performance} <span style={{ fontSize: "13px", color: "var(--text-muted)" }}>USDT</span></div>
+            {parseFloat(statsToDisplay.pendingPerformance || "0") > 0 && (
+              <div className="stat-desc" style={{ color: "var(--yellow)", marginTop: "4px", fontSize: "11px" }}>
+                Pending: <strong>{statsToDisplay.pendingPerformance} USDT</strong>
+              </div>
+            )}
           </div>
         </div>
       </div>
