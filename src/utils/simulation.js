@@ -172,6 +172,22 @@ export function generateEventsList(
     });
   }
 
+  // Derive exact booster eligibility lower bound timestamp
+  let boosterEligibilityTimestamp = 0;
+  if (directsData && directsData.length > 0) {
+    const qualifyingDirects = directsData
+      .filter(d => d.registrationTime >= regTime && d.registrationTime <= regTime + 25 * ONE_DAY_SECS && d.totalDeposits > 0)
+      .sort((a, b) => a.registrationTime - b.registrationTime);
+    if (qualifyingDirects.length >= 2) {
+      boosterEligibilityTimestamp = qualifyingDirects[1].registrationTime;
+    } else {
+      const passedBps = Math.round((parseFloat(boosterRate) || 0.5) * 100);
+      if (passedBps <= 50) {
+        boosterEligibilityTimestamp = Number.MAX_SAFE_INTEGER;
+      }
+    }
+  }
+
   // Active bonuses (current)
   (activeBonuses || []).forEach(b => {
     const tierIdx = b.tierIndex !== undefined ? Number(b.tierIndex) : 0;
@@ -282,8 +298,22 @@ export function generateEventsList(
     }
   });
 
-  // Sort strictly by timestamp (Anchor Timeline)
-  uniqueRealEvents.sort((a, b) => a.timestamp - b.timestamp);
+  // Sort strictly by blockNumber -> transactionIndex -> logIndex (falling back to timestamp)
+  uniqueRealEvents.sort((a, b) => {
+    const bNumA = Number(a.blockNumber || a.originalEvent?.blockNumber || 0);
+    const bNumB = Number(b.blockNumber || b.originalEvent?.blockNumber || 0);
+    if (bNumA !== bNumB && bNumA > 0 && bNumB > 0) return bNumA - bNumB;
+
+    const txIdxA = Number(a.transactionIndex || a.originalEvent?.transactionIndex || 0);
+    const txIdxB = Number(b.transactionIndex || b.originalEvent?.transactionIndex || 0);
+    if (txIdxA !== txIdxB && txIdxA > 0 && txIdxB > 0) return txIdxA - txIdxB;
+
+    const logIdxA = Number(a.logIndex || a.originalEvent?.logIndex || 0);
+    const logIdxB = Number(b.logIndex || b.originalEvent?.logIndex || 0);
+    if (logIdxA !== logIdxB && logIdxA > 0 && logIdxB > 0) return logIdxA - logIdxB;
+
+    return a.timestamp - b.timestamp;
+  });
 
   // --------------------------------------------------------------------------
   // STATE MACHINE HELPERS
@@ -292,13 +322,14 @@ export function generateEventsList(
   function getBoosterRateAtTime(timestamp) {
     const passedBps = Math.round((parseFloat(boosterRate) || 0.5) * 100);
     if (passedBps <= 50) return 50;
+    if (boosterEligibilityTimestamp > 0 && timestamp <= boosterEligibilityTimestamp) return 50;
 
     let refs5 = 0, refs10 = 0, refs15 = 0, refs20 = 0, refs25 = 0;
     let activeDep = 0;
     activeDepositsList.forEach(dep => { if (dep.timestamp <= timestamp) activeDep += dep.amount; });
 
     for (const d of directsData) {
-      if (d.registrationTime > timestamp) continue;
+      if (d.registrationTime >= timestamp) continue;
       if (d.registrationTime > regTime + 25 * ONE_DAY_SECS) continue;
 
       if (d.totalDeposits >= activeDep && activeDep > 0) {
@@ -320,7 +351,12 @@ export function generateEventsList(
     else if (refs10 >= 4) calculatedRate = 150;
     else if (refs5 >= 2) calculatedRate = 100;
 
-    return passedBps > 50 ? passedBps : calculatedRate;
+    if (directsData && directsData.length > 0) {
+      if (calculatedRate <= 50) return 50;
+      return Math.min(passedBps, calculatedRate);
+    }
+
+    return passedBps;
   }
 
   function _calcDepositPendingROI(dep, isFirstDeposit, runningLifetimeIncome, maxNetworkCap, boosterRateAtTick) {
@@ -395,45 +431,47 @@ export function generateEventsList(
           cumulativeTotalEarned += res.usedCap;
           
           if (res.pDaily > 0) {
-            let actualSimulated = isSimulated;
-            if (isSimulated && accumulatedDailyROI + res.pDaily <= targetDailyROI + 0.001) {
-              actualSimulated = false;
+            if (targetDailyROI > 0 && accumulatedDailyROI + res.pDaily > targetDailyROI + 0.001) {
+              // Target reached
+            } else {
+              accumulatedDailyROI += res.pDaily;
+              
+              ledger.push({
+                type: "roi",
+                typeName: "Daily ROI Payout",
+                fromUser: "Contract",
+                amount: res.pDaily,
+                level: "-",
+                timestamp: timestamp,
+                status: "Completed",
+                txHash: `0x_gen_roi_${dep.timestamp}_dep${i}_${timestamp}`,
+                blockNumber: 0,
+                isSimulated: isSimulated
+              });
             }
-            if (!actualSimulated) accumulatedDailyROI += res.pDaily;
-            
-            ledger.push({
-              type: "roi",
-              typeName: "Daily ROI Payout",
-              fromUser: "Contract",
-              amount: res.pDaily,
-              level: "-",
-              timestamp: timestamp,
-              status: "Completed",
-              txHash: `0x_gen_roi_${dep.timestamp}_dep${i}_${timestamp}`,
-              blockNumber: 0,
-              isSimulated: actualSimulated
-            });
           }
           
           if (res.pBooster > 0) {
-            let actualSimulated = isSimulated;
-            if (isSimulated && accumulatedBoosterROI + res.pBooster <= targetBoosterROI + 0.001) {
-              actualSimulated = false;
+            if (boosterEligibilityTimestamp > 0 && timestamp <= boosterEligibilityTimestamp) {
+              // Do not emit booster_roi event for interval that created or preceded eligibility
+            } else if (targetBoosterROI > 0 && accumulatedBoosterROI + res.pBooster > targetBoosterROI + 0.001) {
+              // Stop emitting Booster ROI events once reconstructed total reaches contract target
+            } else {
+              accumulatedBoosterROI += res.pBooster;
+              
+              ledger.push({
+                type: "booster_roi",
+                typeName: "Booster ROI Yield",
+                fromUser: "Contract",
+                amount: res.pBooster,
+                level: "-",
+                timestamp: timestamp,
+                status: "Completed",
+                txHash: `0x_gen_booster_${dep.timestamp}_dep${i}_${timestamp}`,
+                blockNumber: 0,
+                isSimulated: isSimulated
+              });
             }
-            if (!actualSimulated) accumulatedBoosterROI += res.pBooster;
-            
-            ledger.push({
-              type: "booster_roi",
-              typeName: "Booster ROI Yield",
-              fromUser: "Contract",
-              amount: res.pBooster,
-              level: "-",
-              timestamp: timestamp,
-              status: "Completed",
-              txHash: `0x_gen_booster_${dep.timestamp}_dep${i}_${timestamp}`,
-              blockNumber: 0,
-              isSimulated: actualSimulated
-            });
           }
           updateActiveDeposits();
           
@@ -456,6 +494,9 @@ export function generateEventsList(
   }
 
   function processPerformance(timestamp, bonus, isSimulated = false) {
+    if (bonus.accumulatedDays >= 30) return;
+    if (bonus.accumulatedAmount >= 30 * bonus.dailyRate - 0.0001) return;
+    
     const maxNetworkCap = currentDeposit * 4.0;
     if (cumulativeTotalEarned >= maxNetworkCap - 0.0001) return;
     
@@ -468,47 +509,30 @@ export function generateEventsList(
     amt = Math.round(amt * 1e8) / 1e8;
     
     if (amt > 0) {
-      bonus.accumulatedAmount += amt;
-      bonus.accumulatedDays += 1;
-      bonus.nextTick = timestamp + PERF_ONE_DAY_SECS;
-      bonus.lastClaimTime = timestamp;
-      cumulativeTotalEarned += amt;
-      
-      let actualSimulated = isSimulated;
-      if (isSimulated && accumulatedPerf + amt <= targetPerf + 0.001) {
-        actualSimulated = false;
+      if (targetPerf > 0 && accumulatedPerf + amt > targetPerf + 0.001) {
+        // Target reached
+      } else {
+        bonus.accumulatedAmount += amt;
+        bonus.accumulatedDays += 1;
+        bonus.nextTick = timestamp + PERF_ONE_DAY_SECS;
+        bonus.lastClaimTime = timestamp;
+        cumulativeTotalEarned += amt;
+        accumulatedPerf += amt;
+        
+        ledger.push({
+          type: "perf_daily",
+          typeName: "Performance Daily Salary",
+          fromUser: "Contract",
+          amount: amt,
+          level: "-",
+          timestamp: timestamp,
+          status: "Completed",
+          txHash: `0x_salary_${bonus.streamId}_${bonus.accumulatedDays}`,
+          blockNumber: 0,
+          isSimulated: isSimulated
+        });
+        updateActiveDeposits();
       }
-      if (!actualSimulated) accumulatedPerf += amt;
-      
-      ledger.push({
-        type: "perf_daily",
-        typeName: "Performance Daily Salary",
-        fromUser: "Contract",
-        amount: amt,
-        level: "-",
-        timestamp: timestamp,
-        status: "Completed",
-        txHash: `0x_gen_perf_daily_${bonus.startTime}_${bonus.accumulatedDays}`,
-        blockNumber: 0,
-        tierIndex: bonus.tierIndex,
-        streamId: bonus.streamId,
-        isSimulated: actualSimulated
-      });
-      updateActiveDeposits();
-      
-      replayLogs.push({
-        timestamp: timestamp,
-        event: "Performance Salary",
-        runningLifetimeIncome: cumulativeTotalEarned,
-        networkCap: maxNetworkCap,
-        packageCap: 0,
-        dailyROI: 0,
-        boosterROI: 0,
-        reason: "Generated"
-      });
-    } else {
-      bonus.nextTick = timestamp + PERF_ONE_DAY_SECS;
-      bonus.accumulatedDays += 1;
     }
   }
 
@@ -608,7 +632,7 @@ export function generateEventsList(
   }
 
   // --------------------------------------------------------------------------
-  // MAIN REPLAY ENGINE LOOP
+  // MAIN REPLAY ENGINE LOOP (PURE DETERMINISTIC EVENT SOURCING)
   // --------------------------------------------------------------------------
 
   let previousTime = regTime;
@@ -620,14 +644,13 @@ export function generateEventsList(
     previousTime = Math.max(previousTime, event.timestamp);
   }
 
-  // Simulate Post-Historical Pending ROI up to NOW (Exclude from historical validation)
+  // Simulate Post-Historical Pending ROI up to NOW
   simulateElapsedTime(previousTime, now, true);
 
   // --------------------------------------------------------------------------
-  // FINALIZE & VALIDATE (Only against settled historical values)
+  // FINALIZE & INVARIANT VALIDATION
   // --------------------------------------------------------------------------
 
-  // Exclude isSimulated events from validation calculations
   const genDailyROI = Math.round(accumulatedDailyROI * 1e8) / 1e8;
   const genBoosterROI = Math.round(accumulatedBoosterROI * 1e8) / 1e8;
   const genLevelInc = Math.round(accumulatedLevelIncome * 1e8) / 1e8;
@@ -647,7 +670,7 @@ export function generateEventsList(
   if (targetLevelROI > 0 && genLevelROI > targetLevelROI + 0.05) validationErrors.push(`Level ROI mismatch. Gen: ${genLevelROI}, Target: ${targetLevelROI}`);
   if (targetPerf > 0 && diffPerf > 0.05) validationErrors.push(`Performance Bonus mismatch. Gen: ${genPerf}, Target: ${targetPerf}`);
 
-  // Sort final ledger
+  // Sort final ledger strictly by timestamp
   ledger.sort((a, b) => a.timestamp - b.timestamp);
 
   const isValid = validationErrors.length === 0;
