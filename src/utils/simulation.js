@@ -648,6 +648,41 @@ export function generateEventsList(
   simulateElapsedTime(previousTime, now, true);
 
   // --------------------------------------------------------------------------
+  // STORAGE-BACKED PERFORMANCE BONUS FALLBACK
+  // --------------------------------------------------------------------------
+  const existingPerfEntries = ledger.filter(e =>
+    e.type === "perf_instant" ||
+    e.type === "perf_claim" ||
+    e.type === "perf_daily" ||
+    e.type === "perf_fallback"
+  );
+
+  if (existingPerfEntries.length === 0 && targetPerf > 0) {
+    let fallbackTimestamp = regTime;
+    if (activeBonuses && activeBonuses.length > 0) {
+      fallbackTimestamp = Number(activeBonuses[0].startTime || activeBonuses[0].time || regTime);
+    } else if (userDeposits && userDeposits.length > 0) {
+      fallbackTimestamp = Number(userDeposits[0].time || userDeposits[0].timestamp || regTime);
+    }
+
+    ledger.push({
+      type: "perf_daily",
+      typeName: "Performance Daily Salary",
+      fromUser: "contract",
+      amount: targetPerf,
+      level: "-",
+      timestamp: fallbackTimestamp,
+      status: "Completed",
+      txHash: `fallback_perf_${userAddrLower}`,
+      blockNumber: null,
+      isSimulated: false,
+      isFallback: true
+    });
+
+    accumulatedPerf = targetPerf;
+  }
+
+  // --------------------------------------------------------------------------
   // FINALIZE & INVARIANT VALIDATION
   // --------------------------------------------------------------------------
 
