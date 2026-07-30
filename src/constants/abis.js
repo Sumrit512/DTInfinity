@@ -1,5 +1,5 @@
 // Default contract addresses (placeholders that user can update in settings)
-export const DEFAULT_DT_INFINITY_ADDRESS = "0xD00c01EE56C3695976721043Ca18FaA1c0df9107";
+export const DEFAULT_DT_INFINITY_ADDRESS = "0x277D16ca461f781A23BcE657cbB0184A7d7bC7FF";
 export const DEFAULT_USDT_ADDRESS = "0x5e2893770f10106BAD262939d9275463Ce333f46";
 
 // Simple USDT ABI
@@ -38,6 +38,7 @@ export const DT_INFINITY_ABI = [
   "function pendingTierCappedAtStart(address user, uint256 index) external view returns (bool)",
   "function qualificationMonth(address user, uint256 index) external view returns (uint256)",
   "function getActiveBonuses(address user) external view returns (tuple(uint256 startTime, uint256 lastClaimTime, uint256 dailyRate, uint256 endTime)[])",
+  "function getPerformanceBonusRecords(address user) external view returns (tuple(uint16 recordVersion, uint256 recordId, uint256 tierIndex, uint256 monthId, uint256 qualificationTimestamp, uint256 claimWindowOpenTimestamp, uint256 streamStartTimestamp, uint256 streamEndTimestamp, uint256 activatedTimestamp, uint256 intervalSeconds, uint256 scheduledIntervals, uint256 dailyRate, uint256 instantAmount, uint256 dailyAmount, uint256 totalBonus, uint256 daysPaid, uint256 amountPaid, uint8 status, uint8 activationType, bool completed)[])",
   "function getPendingPerformanceQualifications(address userAddr) external view returns (tuple(uint256 tierIndex, uint256 target, uint256 instant, uint256 daily, bool isPending, uint256 claimTime, bool isClaimWindowActive)[])",
   "function getDashboardStats(address user) external view returns (tuple(uint256 dailyROIEarned, uint256 boosterROIEarned, uint256 totalROIEarned, uint256 levelIncomeEarned, uint256 levelROIEarned, uint256 performanceBonusEarned, uint256 pendingDailyROI, uint256 pendingBoosterROI, uint256 pendingPerformanceBonus, uint256 dashboardROI, uint256 dashboardPerformanceBonus, uint256 claimableBalance, uint256 dashboardClaimableBalance, uint256 totalEarned, uint256 roiCap, uint256 roiUsed, uint256 roiRemaining, uint256 roiPercentUsed, uint256 networkCap, uint256 networkUsed, uint256 networkRemaining, uint256 networkPercentUsed))",
   "event Registered(address indexed user, address indexed sponsor, uint256 time)",

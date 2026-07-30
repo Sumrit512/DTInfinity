@@ -648,7 +648,7 @@ export function generateEventsList(
   simulateElapsedTime(previousTime, now, true);
 
   // --------------------------------------------------------------------------
-  // STORAGE-BACKED PERFORMANCE BONUS FALLBACK
+  // STORAGE-BACKED PERFORMANCE BONUS UNIFIED RECORD INGESTION & FALLBACK
   // --------------------------------------------------------------------------
   const existingPerfEntries = ledger.filter(e =>
     e.type === "perf_instant" ||
