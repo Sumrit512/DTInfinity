@@ -1172,12 +1172,10 @@ export default function Dashboard() {
       alert("Please connect wallet first");
       return;
     }
-    const available = parseFloat(userData.claimableBalance) +
-      parseFloat(pendingBalances.pendingDaily) +
-      parseFloat(pendingBalances.pendingBooster) +
-      parseFloat(pendingBalances.pendingPerf);
 
-    if (available <= 0) {
+    const withdrawAmount = statsToDisplay.rawWithdrawable;
+
+    if (withdrawAmount <= 0) {
       alert("No available rewards to claim");
       return;
     }
@@ -1188,7 +1186,8 @@ export default function Dashboard() {
       const signer = await provider.getSigner();
       const dtContract = new ethers.Contract(dtInfinityAddress, DT_INFINITY_ABI, signer);
 
-      const tx = await dtContract.claimAll();
+      const withdrawAmountWei = ethers.parseUnits(withdrawAmount.toFixed(18), 18);
+      const tx = await dtContract.withdraw(withdrawAmountWei);
       const receipt = await tx.wait();
 
       const txDetailsObj = {
@@ -1200,10 +1199,10 @@ export default function Dashboard() {
 
       await parseAndSaveReceiptLogs(receipt, walletAddress);
 
-      alert("All rewards claimed and transferred successfully!");
+      alert("Rewards withdrawn successfully!");
       await loadBlockchainData(walletAddress, txDetailsObj);
     } catch (err) {
-      alert("Claim transaction failed or was rejected.");
+      alert("Withdraw transaction failed or was rejected.");
     } finally {
       setLoading(false);
     }
@@ -1431,63 +1430,66 @@ export default function Dashboard() {
   const txs = unmergedTxs;
 
   const statsToDisplay = useMemo(() => {
-    if (userData?.dashboardStats) {
-      const s = userData.dashboardStats;
-      const calculatedTotalEarned = (
-        parseFloat(s.dashboardROI || "0") +
-        parseFloat(s.levelIncomeEarned || "0") +
-        parseFloat(s.levelROIEarned || "0") +
-        parseFloat(s.performanceBonusEarned || "0") +
-        parseFloat(s.pendingPerformanceBonus || "0")
-      ).toFixed(2);
+    const ledger = simulationResult?.ledger || [];
 
-      return {
-        dailyROI: s.dailyROIEarned,
-        boosterROI: s.boosterROIEarned,
-        levelIncome: s.levelIncomeEarned,
-        levelROI: s.levelROIEarned,
-        performance: s.performanceBonusEarned,
-        pendingPerformance: s.pendingPerformanceBonus,
-        totalROI: s.dashboardROI,
-        totalEarned: calculatedTotalEarned,
-        totalAvailable: s.dashboardClaimableBalance,
-        roiCap: s.roiCap,
-        roiUsed: s.roiUsed,
-        roiRemaining: s.roiRemaining,
-        roiPercentUsed: s.roiPercentUsed,
-        networkCap: s.networkCap,
-        networkUsed: s.networkUsed,
-        networkRemaining: s.networkRemaining,
-        networkPercentUsed: s.networkPercentUsed
-      };
+    // 1. Calculate individual income categories from replay-generated ledger
+    let replayDailyROI = 0;
+    let replayBoosterROI = 0;
+    let replayLevelIncome = 0;
+    let replayLevelROI = 0;
+    let replayPerf = 0;
+
+    for (const e of ledger) {
+      const amt = parseFloat(e.amount) || 0;
+      if (e.type === "roi") {
+        replayDailyROI += amt;
+      } else if (e.type === "booster_roi") {
+        replayBoosterROI += amt;
+      } else if (e.type === "level_income") {
+        replayLevelIncome += amt;
+      } else if (e.type === "level_roi") {
+        replayLevelROI += amt;
+      } else if (["perf_instant", "perf_daily", "perf_claim"].includes(e.type)) {
+        replayPerf += amt;
+      }
     }
 
-    const roiLedgerTotals = calculateLedgerROITotal(txs);
+    // Rounding to 8 decimal places for precision matching
+    replayDailyROI = Math.round(replayDailyROI * 1e8) / 1e8;
+    replayBoosterROI = Math.round(replayBoosterROI * 1e8) / 1e8;
+    replayLevelIncome = Math.round(replayLevelIncome * 1e8) / 1e8;
+    replayLevelROI = Math.round(replayLevelROI * 1e8) / 1e8;
+    replayPerf = Math.round(replayPerf * 1e8) / 1e8;
 
-    const dailyROI = roiLedgerTotals.dailyROI;
-    const boosterROI = roiLedgerTotals.boosterROI;
-    const totalROIVal = roiLedgerTotals.totalROI;
+    // Requirement 1: Total ROI = Daily ROI + Booster ROI
+    const dashboardROIVal = replayDailyROI + replayBoosterROI;
 
-    const levelIncome = parseFloat(userData.levelIncomeEarned || "0");
-    const levelROI = parseFloat(userData.levelROIEarned || "0") + displayPendingLevelROI;
-    const performance = parseFloat(userData.performanceBonusEarned || "0");
+    // Requirement 3: Withdrawable Balance = Daily ROI + Booster ROI + Performance Bonus + Level ROI
+    const withdrawableVal = replayDailyROI + replayBoosterROI + replayPerf + replayLevelROI;
 
-    const totalEarned = (totalROIVal + levelIncome + levelROI + performance + displayPendingPerf).toFixed(2);
-    const storedContractClaimable = parseFloat(userData.claimableBalance || "0") + displayPendingDaily + displayPendingBooster + displayPendingPerf + displayPendingLevelROI;
-    const claimableInContract = Math.max(0, Math.min(storedContractClaimable, maxNetworkCap));
+    // Requirement 4: Total Earned = Daily ROI + Booster ROI + Level Income + Level ROI + Performance Bonus
+    const totalEarnedVal = replayDailyROI + replayBoosterROI + replayLevelIncome + replayLevelROI + replayPerf;
 
     return {
-      dailyROI: dailyROI.toFixed(2),
-      boosterROI: boosterROI.toFixed(2),
-      levelIncome: levelIncome.toFixed(2),
-      levelROI: levelROI.toFixed(2),
-      performance: performance.toFixed(2),
-      pendingPerformance: displayPendingPerf.toFixed(2),
-      totalROI: totalROIVal.toFixed(2),
-      totalEarned: totalEarned,
-      totalAvailable: claimableInContract.toFixed(2)
+      dailyROI: replayDailyROI.toFixed(2),
+      boosterROI: replayBoosterROI.toFixed(2),
+      levelIncome: replayLevelIncome.toFixed(2),
+      levelROI: replayLevelROI.toFixed(2),
+      performance: replayPerf.toFixed(2),
+      pendingPerformance: "0.00",
+      totalROI: dashboardROIVal.toFixed(2),
+      totalEarned: totalEarnedVal.toFixed(2),
+      totalAvailable: withdrawableVal.toFixed(2),
+      // Raw numeric values for withdraw function & validation
+      rawDailyROI: replayDailyROI,
+      rawBoosterROI: replayBoosterROI,
+      rawLevelIncome: replayLevelIncome,
+      rawLevelROI: replayLevelROI,
+      rawPerf: replayPerf,
+      rawWithdrawable: withdrawableVal,
+      rawTotalEarned: totalEarnedVal
     };
-  }, [txs, userData, displayPendingDaily, displayPendingBooster, displayPendingPerf, displayPendingLevelROI, maxNetworkCap]);
+  }, [simulationResult]);
 
   const lifetimeTeamVol = useMemo(() => {
     if (!treeNodes || !walletAddress) return parseFloat(userData.totalTeamVolume || "0");
