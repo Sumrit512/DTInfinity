@@ -510,7 +510,8 @@ export function generateEventsList(
     
     if (amt > 0) {
       if (targetPerf > 0 && accumulatedPerf + amt > targetPerf + 0.001) {
-        // Target reached
+        // Target reached: advance nextTick to ensure loop progresses
+        bonus.nextTick = timestamp + PERF_ONE_DAY_SECS;
       } else {
         bonus.accumulatedAmount += amt;
         bonus.accumulatedDays += 1;
@@ -533,12 +534,21 @@ export function generateEventsList(
         });
         updateActiveDeposits();
       }
+    } else {
+      bonus.nextTick = timestamp + PERF_ONE_DAY_SECS;
     }
   }
 
   function simulateElapsedTime(start, end, isPending = false) {
     let currentTime = start;
+    let iterations = 0;
+    const maxIterations = 5000;
     while (true) {
+      iterations++;
+      if (iterations > maxIterations) {
+        console.warn("simulateElapsedTime safety iteration limit reached, breaking loop.");
+        break;
+      }
       let nextTick = end + 1;
       let tickType = null;
       let tickData = null;
@@ -563,7 +573,14 @@ export function generateEventsList(
         }
       }
       
-      if (nextTick > end) break;
+      if (nextTick > end || nextTick <= currentTime) {
+        if (nextTick <= currentTime && nextTick <= end) {
+          if (tickType === 'PERFORMANCE' && tickData) {
+            tickData.nextTick = currentTime + PERF_ONE_DAY_SECS;
+          }
+        }
+        break;
+      }
       
       currentTime = nextTick;
       
