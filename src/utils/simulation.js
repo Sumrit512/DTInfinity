@@ -652,6 +652,11 @@ export function generateEventsList(
   // MAIN REPLAY ENGINE LOOP (PURE DETERMINISTIC EVENT SOURCING)
   // --------------------------------------------------------------------------
 
+  // 2. PERFORMANCE REPLAY START
+  console.log("PERFORMANCE REPLAY START");
+  console.log("Replay Source:", activeBonuses && activeBonuses.length > 0 ? (activeBonuses[0].fromRecords ? "PerformanceBonusRecords" : "ActiveBonuses") : "Fallback");
+  console.log("Stream Count:", (activeBonuses || []).length);
+
   let previousTime = regTime;
   for (const event of uniqueRealEvents) {
     if (event.timestamp > previousTime) {
@@ -674,7 +679,13 @@ export function generateEventsList(
     e.type === "perf_fallback"
   );
 
+  let fallbackExecuted = false;
   if (existingPerfEntries.length === 0 && targetPerf > 0) {
+    fallbackExecuted = true;
+    // 3. PERFORMANCE FALLBACK EXECUTED (Only if fallback triggers)
+    console.log("❌ PERFORMANCE FALLBACK EXECUTED");
+    console.log("Reason: No performance entries generated during replay and targetPerf > 0");
+
     let fallbackTimestamp = regTime;
     if (activeBonuses && activeBonuses.length > 0) {
       fallbackTimestamp = Number(activeBonuses[0].startTime || activeBonuses[0].time || regTime);
@@ -724,6 +735,24 @@ export function generateEventsList(
 
   // Sort final ledger strictly by timestamp
   ledger.sort((a, b) => a.timestamp - b.timestamp);
+
+  // 4. PERFORMANCE REPLAY GENERATED (If replay succeeds)
+  const generatedSalaryEvents = ledger.filter(x => x.type === "perf_daily" && !x.isFallback);
+  if (generatedSalaryEvents.length > 0) {
+    console.log("✅ PERFORMANCE REPLAY GENERATED");
+    console.log("Generated Events:", generatedSalaryEvents.length);
+    console.log("First Timestamp:", generatedSalaryEvents[0].timestamp);
+    console.log("Last Timestamp:", generatedSalaryEvents[generatedSalaryEvents.length - 1].timestamp);
+    console.log("Total Amount:", generatedSalaryEvents.reduce((sum, ev) => sum + ev.amount, 0));
+  }
+
+  const perfEntries = ledger.filter(x => x.type === "perf_daily");
+
+  // 5. PERFORMANCE SUMMARY
+  console.log("========== PERFORMANCE SUMMARY ==========");
+  console.log("Fallback Used:", fallbackExecuted);
+  console.log("Generated Salary Events:", generatedSalaryEvents.length);
+  console.log("Ledger Entries:", perfEntries.length);
 
   const isValid = validationErrors.length === 0;
 

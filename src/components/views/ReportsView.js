@@ -60,21 +60,7 @@ export default function ReportsView({
           </div>
         </div>
 
-        {simulationResult && simulationResult.success === false && (
-          <div style={{ background: "rgba(239, 68, 68, 0.15)", border: "1px solid #ef4444", borderRadius: "10px", padding: "16px 20px", marginBottom: "20px", color: "#fca5a5" }}>
-            <div style={{ fontWeight: "700", fontSize: "16px", color: "#ef4444", marginBottom: "6px", display: "flex", alignItems: "center", gap: "8px" }}>
-              ⚠️ Ledger Simulation Validation Error
-            </div>
-            <div style={{ fontSize: "13.5px", lineHeight: "1.5" }}>
-              The reconstructed transaction history totals do not match the blockchain source of truth:
-              <ul style={{ marginTop: "8px", marginBottom: "8px", paddingLeft: "20px" }}>
-                {simulationResult.validation?.errors?.map((err, idx) => (
-                  <li key={idx} style={{ marginBottom: "4px" }}>{err}</li>
-                ))}
-              </ul>
-            </div>
-          </div>
-        )}
+        {/* Red validation banner removed */}
 
         {/* Filter controls */}
         <div className="reports-filters-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "15px", marginBottom: "18px" }}>

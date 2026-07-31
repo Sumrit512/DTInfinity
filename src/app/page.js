@@ -776,32 +776,82 @@ export default function Dashboard() {
           console.warn("Could not read user deposits/withdrawals arrays", e);
         }
 
+        let rawPerformanceRecords = [];
+        try {
+          if (typeof dtContract.getPerformanceBonusRecords === "function") {
+            rawPerformanceRecords = await dtContract.getPerformanceBonusRecords(addr);
+          }
+        } catch (e) {
+          console.warn("Could not read performance bonus records", e);
+        }
+
         let bonusesMapped = [];
+        let rawActiveBonuses = [];
+        let replaySource = "Fallback";
+
         try {
           if (typeof dtContract.getActiveBonuses === "function") {
-            const bonuses = await dtContract.getActiveBonuses(addr);
-            bonusesMapped = (bonuses || []).map(b => {
-              const dailyRateVal = parseFloat(ethers.formatUnits(b.dailyRate || 0n, 18));
-              let tierIndex = 0;
-              for (let t = 0; t < PERFORMANCE_TIERS.length; t++) {
-                if (Math.abs(PERFORMANCE_TIERS[t].daily - dailyRateVal) < 0.1) {
-                  tierIndex = t;
-                  break;
+            rawActiveBonuses = await dtContract.getActiveBonuses(addr);
+            if (rawActiveBonuses && rawActiveBonuses.length > 0) {
+              bonusesMapped = rawActiveBonuses.map(b => {
+                const dailyRateVal = parseFloat(ethers.formatUnits(b.dailyRate || 0n, 18));
+                let tierIndex = 0;
+                for (let t = 0; t < PERFORMANCE_TIERS.length; t++) {
+                  if (Math.abs(PERFORMANCE_TIERS[t].daily - dailyRateVal) < 0.1) {
+                    tierIndex = t;
+                    break;
+                  }
                 }
+                return {
+                  tierIndex,
+                  dailyRate: dailyRateVal,
+                  startTime: Number(b.startTime || 0n),
+                  endTime: Number(b.endTime || 0n),
+                  lastClaimTime: Number(b.lastClaimTime || 0n),
+                  fromRecords: false
+                };
+              });
+              if (bonusesMapped.length > 0) {
+                replaySource = "ActiveBonuses";
               }
-              return {
-                tierIndex,
-                dailyRate: dailyRateVal,
-                startTime: Number(b.startTime || 0n),
-                endTime: Number(b.endTime || 0n),
-                lastClaimTime: Number(b.lastClaimTime || 0n)
-              };
-            });
-            setActiveBonuses(bonusesMapped);
+            }
           }
         } catch (e) {
           console.warn("Could not read active bonuses", e);
         }
+
+        // If getActiveBonuses() is empty, obtain replay source from getPerformanceBonusRecords()
+        if (bonusesMapped.length === 0 && rawPerformanceRecords && rawPerformanceRecords.length > 0) {
+          bonusesMapped = rawPerformanceRecords.map(r => {
+            const dailyRateVal = parseFloat(ethers.formatUnits(r.dailyRate || 0n, 18));
+            const startT = Number(r.streamStartTimestamp || r.monthId || 0n);
+            const scheduledInts = Number(r.scheduledIntervals || 30);
+            const intervalSecs = Number(r.intervalSeconds || 480);
+            const endT = Number(r.streamEndTimestamp || (startT + scheduledInts * intervalSecs));
+            return {
+              tierIndex: Number(r.tierIndex || 0),
+              dailyRate: dailyRateVal > 0 ? dailyRateVal : 5.0,
+              startTime: startT,
+              endTime: endT,
+              lastClaimTime: startT,
+              fromRecords: true
+            };
+          });
+
+          if (bonusesMapped.length > 0) {
+            replaySource = "PerformanceBonusRecords";
+          }
+        }
+
+        setActiveBonuses(bonusesMapped);
+
+        // 1. Required Debug Console Log
+        console.log("========== PERFORMANCE BONUS DEBUG ==========");
+        console.log("Wallet:", addr);
+        console.log("Performance Records Count:", (rawPerformanceRecords || []).length);
+        console.log("Active Bonuses Count:", (rawActiveBonuses || []).length);
+        console.log("Replay Source:", replaySource);
+        console.log("Fallback Triggered:", replaySource === "Fallback");
 
         await refreshPendingQualifications(addr);
 
@@ -1381,63 +1431,90 @@ export default function Dashboard() {
   const txs = unmergedTxs;
 
   const statsToDisplay = useMemo(() => {
-    if (userData?.dashboardStats) {
-      const s = userData.dashboardStats;
-      const calculatedTotalEarned = (
-        parseFloat(s.dashboardROI || "0") +
-        parseFloat(s.levelIncomeEarned || "0") +
-        parseFloat(s.levelROIEarned || "0") +
-        parseFloat(s.performanceBonusEarned || "0") +
-        parseFloat(s.pendingPerformanceBonus || "0")
-      ).toFixed(2);
+    const list = txs || [];
 
-      return {
-        dailyROI: s.dailyROIEarned,
-        boosterROI: s.boosterROIEarned,
-        levelIncome: s.levelIncomeEarned,
-        levelROI: s.levelROIEarned,
-        performance: s.performanceBonusEarned,
-        pendingPerformance: s.pendingPerformanceBonus,
-        totalROI: s.dashboardROI,
-        totalEarned: calculatedTotalEarned,
-        totalAvailable: s.dashboardClaimableBalance,
-        roiCap: s.roiCap,
-        roiUsed: s.roiUsed,
-        roiRemaining: s.roiRemaining,
-        roiPercentUsed: s.roiPercentUsed,
-        networkCap: s.networkCap,
-        networkUsed: s.networkUsed,
-        networkRemaining: s.networkRemaining,
-        networkPercentUsed: s.networkPercentUsed
-      };
-    }
+    const dailyROIVal = list
+      .filter(tx => tx.type === "roi" && tx.amount > 0)
+      .reduce((sum, tx) => sum + (tx.amount || 0), 0);
 
-    const roiLedgerTotals = calculateLedgerROITotal(txs);
+    const boosterROIVal = list
+      .filter(tx => tx.type === "booster_roi" && tx.amount > 0)
+      .reduce((sum, tx) => sum + (tx.amount || 0), 0);
 
-    const dailyROI = roiLedgerTotals.dailyROI;
-    const boosterROI = roiLedgerTotals.boosterROI;
-    const totalROIVal = roiLedgerTotals.totalROI;
+    const perfBonusVal = list
+      .filter(tx => (tx.type === "perf_instant" || tx.type === "perf_claim" || tx.type === "perf_daily") && tx.amount > 0)
+      .reduce((sum, tx) => sum + (tx.amount || 0), 0);
 
-    const levelIncome = parseFloat(userData.levelIncomeEarned || "0");
-    const levelROI = parseFloat(userData.levelROIEarned || "0") + displayPendingLevelROI;
-    const performance = parseFloat(userData.performanceBonusEarned || "0");
+    const levelIncomeVal = Math.max(
+      list.filter(tx => tx.type === "level_income" && tx.amount > 0).reduce((sum, tx) => sum + (tx.amount || 0), 0),
+      parseFloat(userData?.levelIncomeEarned || "0")
+    );
 
-    const totalEarned = (totalROIVal + levelIncome + levelROI + performance + displayPendingPerf).toFixed(2);
-    const storedContractClaimable = parseFloat(userData.claimableBalance || "0") + displayPendingDaily + displayPendingBooster + displayPendingPerf + displayPendingLevelROI;
-    const claimableInContract = Math.max(0, Math.min(storedContractClaimable, maxNetworkCap));
+    const levelROIVal = Math.max(
+      list.filter(tx => tx.type === "level_roi" && tx.amount > 0).reduce((sum, tx) => sum + (tx.amount || 0), 0),
+      parseFloat(userData?.levelROIEarned || "0")
+    );
+
+    const withdrawnVal = Math.max(
+      list.filter(tx => tx.type === "withdraw" && tx.amount > 0).reduce((sum, tx) => sum + (tx.amount || 0), 0),
+      parseFloat(userData?.totalWithdrawn || "0")
+    );
+
+    // Claimable Balance = (Total Daily ROI + Total Booster ROI + Total Performance Bonus + Total Level ROI) - Total Withdrawn
+    const claimableVal = Math.max(0, (dailyROIVal + boosterROIVal + perfBonusVal + levelROIVal) - withdrawnVal);
+
+    // Total Earned = Daily ROI + Booster ROI + Performance Bonus + Level Income + Level ROI
+    const totalEarnedVal = dailyROIVal + boosterROIVal + perfBonusVal + levelIncomeVal + levelROIVal;
+
+    const userDepAmt = parseFloat(userData?.totalDeposits || "0");
+    const maxRoiCapVal = userDepAmt * 2.2;
+    const maxNetworkCapVal = userDepAmt * 4.0;
+
+    const roiUsedVal = totalEarnedVal;
+    const roiRemainingVal = Math.max(0, maxRoiCapVal - roiUsedVal);
+
+    const networkUsedVal = totalEarnedVal;
+    const networkRemainingVal = Math.max(0, maxNetworkCapVal - networkUsedVal);
 
     return {
-      dailyROI: dailyROI.toFixed(2),
-      boosterROI: boosterROI.toFixed(2),
-      levelIncome: levelIncome.toFixed(2),
-      levelROI: levelROI.toFixed(2),
-      performance: performance.toFixed(2),
-      pendingPerformance: displayPendingPerf.toFixed(2),
-      totalROI: totalROIVal.toFixed(2),
-      totalEarned: totalEarned,
-      totalAvailable: claimableInContract.toFixed(2)
+      dailyROI: dailyROIVal.toFixed(2),
+      boosterROI: boosterROIVal.toFixed(2),
+      performance: perfBonusVal.toFixed(2),
+      levelIncome: levelIncomeVal.toFixed(2),
+      levelROI: levelROIVal.toFixed(2),
+      withdrawn: withdrawnVal.toFixed(2),
+      totalROI: (dailyROIVal + boosterROIVal).toFixed(2),
+      totalEarned: totalEarnedVal.toFixed(2),
+      totalAvailable: claimableVal.toFixed(2),
+      roiCap: maxRoiCapVal.toFixed(2),
+      roiUsed: roiUsedVal.toFixed(2),
+      roiRemaining: roiRemainingVal.toFixed(2),
+      roiPercentUsed: maxRoiCapVal > 0 ? Math.min(100, (roiUsedVal / maxRoiCapVal) * 100) : 0,
+      networkCap: maxNetworkCapVal.toFixed(2),
+      networkUsed: networkUsedVal.toFixed(2),
+      networkRemaining: networkRemainingVal.toFixed(2),
+      networkPercentUsed: maxNetworkCapVal > 0 ? Math.min(100, (networkUsedVal / maxNetworkCapVal) * 100) : 0
     };
-  }, [txs, userData, displayPendingDaily, displayPendingBooster, displayPendingPerf, displayPendingLevelROI, maxNetworkCap]);
+  }, [txs, userData]);
+
+  useEffect(() => {
+    if (walletAddress && statsToDisplay) {
+      console.log("========== DASHBOARD SUMMARY ==========\n");
+      console.log("Daily ROI:", statsToDisplay.dailyROI);
+      console.log("Booster ROI:", statsToDisplay.boosterROI);
+      console.log("Performance Bonus:", statsToDisplay.performance);
+      console.log("Level Income:", statsToDisplay.levelIncome);
+      console.log("Level ROI:", statsToDisplay.levelROI);
+      console.log("\nWithdrawn:", statsToDisplay.withdrawn);
+      console.log("\nClaimable Balance:", statsToDisplay.totalAvailable);
+      console.log("\nTotal Earned:", statsToDisplay.totalEarned);
+      console.log("\n220% Cap Used:", statsToDisplay.roiUsed);
+      console.log("220% Cap Remaining:", statsToDisplay.roiRemaining);
+      console.log("\n400% Cap Used:", statsToDisplay.networkUsed);
+      console.log("400% Cap Remaining:", statsToDisplay.networkRemaining);
+      console.log("\n=======================================");
+    }
+  }, [walletAddress, statsToDisplay]);
 
   const lifetimeTeamVol = useMemo(() => {
     if (!treeNodes || !walletAddress) return parseFloat(userData.totalTeamVolume || "0");
