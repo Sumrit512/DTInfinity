@@ -80,6 +80,9 @@ export default defineSchema({
     isSimulated: v.boolean(),
     tierIndex: v.optional(v.number()),
     logIndex: v.optional(v.number()), // RPC log index to uniquely identify events within the same tx
+    dailyRate: v.optional(v.union(v.number(), v.string())),
+    streamStartTime: v.optional(v.number()),
+    streamEndTime: v.optional(v.number()),
   }).index("by_contract_address_user_time", ["contractAddress", "user", "timestamp"])
     .index("by_txHash", ["txHash"]),
 });

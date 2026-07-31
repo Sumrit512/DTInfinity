@@ -20,6 +20,9 @@ export const syncOnChainEvents = mutation({
       tierIndex: v.optional(v.number()),
       logIndex: v.optional(v.number()),
       user: v.optional(v.string()),
+      dailyRate: v.optional(v.union(v.number(), v.string())),
+      streamStartTime: v.optional(v.number()),
+      streamEndTime: v.optional(v.number()),
     })),
   },
   handler: async (ctx, args) => {
