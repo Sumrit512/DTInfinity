@@ -1186,8 +1186,29 @@ export default function Dashboard() {
       const signer = await provider.getSigner();
       const dtContract = new ethers.Contract(dtInfinityAddress, DT_INFINITY_ABI, signer);
 
-      const withdrawAmountWei = ethers.parseUnits(withdrawAmount.toFixed(18), 18);
-      const tx = await dtContract.withdraw(withdrawAmountWei);
+      let onChainClaimableWei = 0n;
+      try {
+        const userInfo = await dtContract.getUserBasicInfo(walletAddress);
+        onChainClaimableWei = userInfo.claimableBalance || 0n;
+      } catch (_) { }
+
+      let withdrawAmountWei = ethers.parseUnits(withdrawAmount.toFixed(18), 18);
+      if (onChainClaimableWei > 0n && withdrawAmountWei > onChainClaimableWei) {
+        withdrawAmountWei = onChainClaimableWei;
+      }
+
+      let tx;
+      try {
+        tx = await dtContract.withdraw(withdrawAmountWei, { gasLimit: 500000n });
+      } catch (withdrawErr) {
+        console.warn("withdraw(amount) failed, attempting fallback claimAll():", withdrawErr);
+        try {
+          tx = await dtContract.claimAll({ gasLimit: 500000n });
+        } catch (claimAllErr) {
+          throw withdrawErr;
+        }
+      }
+
       const receipt = await tx.wait();
 
       const txDetailsObj = {
@@ -1202,7 +1223,9 @@ export default function Dashboard() {
       alert("Rewards withdrawn successfully!");
       await loadBlockchainData(walletAddress, txDetailsObj);
     } catch (err) {
-      alert("Withdraw transaction failed or was rejected.");
+      console.error("Withdraw transaction error:", err);
+      const errMsg = err?.reason || err?.data?.message || err?.message || "Withdraw transaction failed or was rejected.";
+      alert(`Withdraw transaction failed: ${errMsg}`);
     } finally {
       setLoading(false);
     }
