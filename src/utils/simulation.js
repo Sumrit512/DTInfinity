@@ -414,45 +414,37 @@ export function generateEventsList(
           cumulativeTotalEarned += res.usedCap;
 
           if (res.pDaily > 0) {
-            if (targetDailyROI > 0 && accumulatedDailyROI + res.pDaily > targetDailyROI + 0.001) {
-              // Target reached
-            } else {
-              accumulatedDailyROI += res.pDaily;
+            accumulatedDailyROI += res.pDaily;
 
-              ledger.push({
-                type: "roi",
-                typeName: "Daily ROI Payout",
-                fromUser: "Contract",
-                amount: res.pDaily,
-                level: "-",
-                timestamp: timestamp,
-                status: "Completed",
-                txHash: `0x_gen_roi_${dep.timestamp}_dep${i}_${timestamp}`,
-                blockNumber: 0,
-                isSimulated: isSimulated
-              });
-            }
+            ledger.push({
+              type: "roi",
+              typeName: "Daily ROI Payout",
+              fromUser: "Contract",
+              amount: res.pDaily,
+              level: "-",
+              timestamp: timestamp,
+              status: "Completed",
+              txHash: `0x_gen_roi_${dep.timestamp}_dep${i}_${timestamp}`,
+              blockNumber: 0,
+              isSimulated: isSimulated
+            });
           }
 
           if (res.pBooster > 0) {
-            if (targetBoosterROI > 0 && accumulatedBoosterROI + res.pBooster > targetBoosterROI + 0.001) {
-              // Stop emitting Booster ROI events once reconstructed total reaches contract target
-            } else {
-              accumulatedBoosterROI += res.pBooster;
+            accumulatedBoosterROI += res.pBooster;
 
-              ledger.push({
-                type: "booster_roi",
-                typeName: "Booster ROI Yield",
-                fromUser: "Contract",
-                amount: res.pBooster,
-                level: "-",
-                timestamp: timestamp,
-                status: "Completed",
-                txHash: `0x_gen_booster_${dep.timestamp}_dep${i}_${timestamp}`,
-                blockNumber: 0,
-                isSimulated: isSimulated
-              });
-            }
+            ledger.push({
+              type: "booster_roi",
+              typeName: "Booster ROI Yield",
+              fromUser: "Contract",
+              amount: res.pBooster,
+              level: "-",
+              timestamp: timestamp,
+              status: "Completed",
+              txHash: `0x_gen_booster_${dep.timestamp}_dep${i}_${timestamp}`,
+              blockNumber: 0,
+              isSimulated: isSimulated
+            });
           }
           updateActiveDeposits();
 
@@ -490,31 +482,26 @@ export function generateEventsList(
     amt = Math.round(amt * 1e8) / 1e8;
 
     if (amt > 0) {
-      if (targetPerf > 0 && accumulatedPerf + amt > targetPerf + 0.001) {
-        // Target reached: advance nextTick to ensure loop progresses
-        bonus.nextTick = timestamp + PERF_ONE_DAY_SECS;
-      } else {
-        bonus.accumulatedAmount += amt;
-        bonus.accumulatedDays += 1;
-        bonus.nextTick = timestamp + PERF_ONE_DAY_SECS;
-        bonus.lastClaimTime = timestamp;
-        cumulativeTotalEarned += amt;
-        accumulatedPerf += amt;
+      bonus.accumulatedAmount += amt;
+      bonus.accumulatedDays += 1;
+      bonus.nextTick = timestamp + PERF_ONE_DAY_SECS;
+      bonus.lastClaimTime = timestamp;
+      cumulativeTotalEarned += amt;
+      accumulatedPerf += amt;
 
-        ledger.push({
-          type: "perf_daily",
-          typeName: "Performance Daily Salary",
-          fromUser: "Contract",
-          amount: amt,
-          level: "-",
-          timestamp: timestamp,
-          status: "Completed",
-          txHash: `0x_salary_${bonus.streamId}_${bonus.accumulatedDays}`,
-          blockNumber: 0,
-          isSimulated: isSimulated
-        });
-        updateActiveDeposits();
-      }
+      ledger.push({
+        type: "perf_daily",
+        typeName: "Performance Daily Salary",
+        fromUser: "Contract",
+        amount: amt,
+        level: "-",
+        timestamp: timestamp,
+        status: "Completed",
+        txHash: `0x_salary_${bonus.streamId}_${bonus.accumulatedDays}`,
+        blockNumber: 0,
+        isSimulated: isSimulated
+      });
+      updateActiveDeposits();
     } else {
       bonus.nextTick = timestamp + PERF_ONE_DAY_SECS;
     }

@@ -534,7 +534,7 @@ export default function Dashboard() {
     try {
       const provider = new ethers.BrowserProvider(window.ethereum);
       const dtContract = new ethers.Contract(dtInfinityAddress, DT_INFINITY_ABI, provider);
-      
+
       if (!dtContract?.getPendingPerformanceQualifications || typeof dtContract.getPendingPerformanceQualifications !== "function") {
         console.warn("[PerfBonus] getPendingPerformanceQualifications not available on contract instance");
         setPendingQualifications([]);
@@ -1486,8 +1486,8 @@ export default function Dashboard() {
     const boosterTier = simulationResult?.boosterTier || {
       tierName: "Standard",
       boosterRateBps: 50,
-      rateText: "0.50% Daily ROI",
-      displayText: "Standard (0.50% Daily ROI)"
+      rateText: "0.50% ",
+      displayText: "0.50%"
     };
 
     return {
@@ -1577,7 +1577,8 @@ export default function Dashboard() {
       if (searchFromUser) {
         const searchStr = searchFromUser.trim().toLowerCase();
         const fromUserStr = (tx.fromUser || "").toLowerCase();
-        if (!fromUserStr.includes(searchStr)) return false;
+        const userStr = (tx.user || "").toLowerCase();
+        if (!fromUserStr.includes(searchStr) && !userStr.includes(searchStr)) return false;
       }
 
       return true;

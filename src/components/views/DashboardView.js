@@ -36,7 +36,7 @@ export default function DashboardView({
 
   const userDepNum = parseFloat(userData?.totalDeposits || "0");
   const maxNetCap = userDepNum * 4.0;
-  const currentEarnedFromUserData = 
+  const currentEarnedFromUserData =
     parseFloat(userData?.dailyROIEarned || "0") +
     parseFloat(userData?.roiBoosterEarned || "0") +
     parseFloat(userData?.levelIncomeEarned || "0") +
@@ -236,7 +236,7 @@ export default function DashboardView({
           <div className="stat-val display" style={{ color: "var(--text)" }}>
             {userData.totalDeposits} <span className="unit">USDT</span>
           </div>
-          <div className="stat-desc">Current Booster Tier: <strong style={{ color: "var(--blue-bright)" }}>{statsToDisplay?.boosterTier?.displayText || "Standard (0.50% Daily ROI)"}</strong></div>
+          <div className="stat-desc">Current Booster Tier: <strong style={{ color: "var(--blue-bright)" }}>{statsToDisplay?.boosterTier?.displayText || "0.50%"}</strong></div>
           <div style={{ marginTop: "15px" }}>
             <button
               onClick={() => setActiveView("deposit")}
@@ -352,7 +352,7 @@ export default function DashboardView({
           <div className="card-head">
             <div>
               <h3 className="card-title">Daily ROI & Booster Capping (220%)</h3>
-              <p className="card-subtitle">Booster Tier: <strong style={{ color: "#f3ba2f" }}>{statsToDisplay?.boosterTier?.displayText || "Standard (0.50% Daily ROI)"}</strong></p>
+              <p className="card-subtitle">Booster Tier: <strong style={{ color: "#f3ba2f" }}>{statsToDisplay?.boosterTier?.displayText || " 0.50%"}</strong></p>
             </div>
             <div className="mono" style={{ fontSize: "16px", fontWeight: "800", color: "#f3ba2f", background: "rgba(243, 186, 47, 0.15)", padding: "4px 10px", borderRadius: "8px", border: "1px solid rgba(243, 186, 47, 0.3)" }}>
               {roiCapPercent.toFixed(1)}%
