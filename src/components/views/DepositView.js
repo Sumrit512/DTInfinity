@@ -138,7 +138,7 @@ export default function DepositView({
               transition: "all 0.2s ease"
             }}
           >
-            Mint 500 Test USDT
+            Mint 50000 Test USDT
           </button>
         </div>
       </div>

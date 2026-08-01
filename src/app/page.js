@@ -908,10 +908,10 @@ export default function Dashboard() {
       const signer = await provider.getSigner();
       const usdtContract = new ethers.Contract(usdtAddress, USDT_ABI, signer);
 
-      const tx = await usdtContract.mint(walletAddress, ethers.parseUnits("500", 18));
+      const tx = await usdtContract.mint(walletAddress, ethers.parseUnits("50000", 18));
       await tx.wait();
 
-      alert("500 Test USDT minted to your wallet!");
+      alert("50000 Test USDT minted to your wallet!");
       await loadBlockchainData(walletAddress);
     } catch (err) {
       alert("Mint failed. Verify you are using the Mock USDT contract.");
@@ -1486,7 +1486,7 @@ export default function Dashboard() {
     const boosterTier = simulationResult?.boosterTier || {
       tierName: "Standard",
       boosterRateBps: 50,
-      rateText: "0.50% ",
+      rateText: "0.50% Daily ROI",
       displayText: "0.50%"
     };
 
