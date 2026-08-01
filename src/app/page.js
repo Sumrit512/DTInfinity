@@ -1483,6 +1483,13 @@ export default function Dashboard() {
     // Requirement 4: Total Earned = Daily ROI + Booster ROI + Level Income + Level ROI + Performance Bonus
     const totalEarnedVal = replayDailyROI + replayBoosterROI + replayLevelIncome + replayLevelROI + replayPerf;
 
+    const boosterTier = simulationResult?.boosterTier || {
+      tierName: "Standard",
+      boosterRateBps: 50,
+      rateText: "0.50% Daily ROI",
+      displayText: "Standard (0.50% Daily ROI)"
+    };
+
     return {
       dailyROI: replayDailyROI.toFixed(2),
       boosterROI: replayBoosterROI.toFixed(2),
@@ -1493,6 +1500,7 @@ export default function Dashboard() {
       totalROI: dashboardROIVal.toFixed(2),
       totalEarned: totalEarnedVal.toFixed(2),
       totalAvailable: withdrawableVal.toFixed(2),
+      boosterTier: boosterTier,
       // Raw numeric values for withdraw function & validation
       rawDailyROI: replayDailyROI,
       rawBoosterROI: replayBoosterROI,
@@ -1534,7 +1542,7 @@ export default function Dashboard() {
 
   const totalAvailableBalance = statsToDisplay.totalAvailable;
   const totalEarnedAcrossStreams = statsToDisplay.totalEarned;
-  const currentRoiEarned = statsToDisplay.rawDailyROI + statsToDisplay.rawBoosterROI;
+  const currentRoiEarned = statsToDisplay.rawTotalEarned;
   const roiCapPercent = maxRoiCap > 0 ? Math.min((currentRoiEarned / maxRoiCap) * 100, 100) : 0;
   const currentNetworkEarned = statsToDisplay.rawTotalEarned;
   const networkCapPercent = maxNetworkCap > 0 ? Math.min((currentNetworkEarned / maxNetworkCap) * 100, 100) : 0;

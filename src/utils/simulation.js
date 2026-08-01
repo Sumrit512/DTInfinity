@@ -55,7 +55,7 @@ export function generateSimulatedLedger(addr, basicInfo, incomeInfo, directs, cu
   const sponsorJoin = Number(basicInfo?.registrationTime || 0);
   const PERF_ONE_DAY_SECS = Number(currentPerfOneDayVal);
   const now = Math.floor(Date.now() / 1000);
-  
+
   const sponsorDeposit = basicInfo && basicInfo.totalDeposits !== undefined && basicInfo.totalDeposits !== null
     ? (typeof basicInfo.totalDeposits === "bigint" ? safeFloat(ethers.formatUnits(basicInfo.totalDeposits, 18)) : parseFloat(basicInfo.totalDeposits || 0))
     : 0;
@@ -172,22 +172,6 @@ export function generateEventsList(
     });
   }
 
-  // Derive exact booster eligibility lower bound timestamp
-  let boosterEligibilityTimestamp = 0;
-  if (directsData && directsData.length > 0) {
-    const qualifyingDirects = directsData
-      .filter(d => d.registrationTime >= regTime && d.registrationTime <= regTime + 25 * ONE_DAY_SECS && d.totalDeposits > 0)
-      .sort((a, b) => a.registrationTime - b.registrationTime);
-    if (qualifyingDirects.length >= 2) {
-      boosterEligibilityTimestamp = qualifyingDirects[1].registrationTime;
-    } else {
-      const passedBps = Math.round((parseFloat(boosterRate) || 0.5) * 100);
-      if (passedBps <= 50) {
-        boosterEligibilityTimestamp = Number.MAX_SAFE_INTEGER;
-      }
-    }
-  }
-
   // Active bonuses (current)
   (activeBonuses || []).forEach(b => {
     const tierIdx = b.tierIndex !== undefined ? Number(b.tierIndex) : 0;
@@ -209,18 +193,18 @@ export function generateEventsList(
 
   // Reconstruct Historical Performance Bonus Streams from Blockchain History
   const validOnChain = (onChainEvents || []).filter(e => !e.isSimulated && (!e.user || e.user.toLowerCase() === userAddrLower));
-  
+
   validOnChain.forEach(e => {
     if (e.type === 'perf_claim') {
       const tierIdx = e.tierIndex !== undefined ? Number(e.tierIndex) : (e.originalEvent?.tierIndex !== undefined ? Number(e.originalEvent.tierIndex) : 0);
-      
+
       const exactStartTime = Number(e.streamStartTime !== undefined ? e.streamStartTime : (e.originalEvent?.streamStartTime !== undefined ? e.originalEvent.streamStartTime : (e.startTime !== undefined ? e.startTime : (e.originalEvent?.startTime !== undefined ? e.originalEvent.startTime : e.timestamp))));
       const exactLastClaimTime = exactStartTime;
       const dailyRate = e.dailyRate !== undefined ? e.dailyRate : (e.originalEvent?.dailyRate !== undefined ? e.originalEvent.dailyRate : (PERFORMANCE_TIERS[tierIdx]?.daily || 5));
       const exactEndTime = Number(e.streamEndTime !== undefined ? e.streamEndTime : (e.originalEvent?.streamEndTime !== undefined ? e.originalEvent.streamEndTime : (e.endTime !== undefined ? e.endTime : (e.originalEvent?.endTime !== undefined ? e.originalEvent.endTime : exactStartTime + 30 * PERF_ONE_DAY_SECS))));
 
       const streamId = `${tierIdx}_${exactStartTime}`;
-      
+
       // Never overwrite an existing stream; preserve all historical streams independently
       if (!activeBonusesList.find(b => b.streamId === streamId)) {
         activeBonusesList.push({
@@ -240,7 +224,7 @@ export function generateEventsList(
 
   // Extract Real Blockchain Events
   const rawRealEvents = [];
-  
+
   // Gather deposits securely from userDeposits
   let allDeposits = [];
   if (userDeposits && userDeposits.length > 0) {
@@ -321,42 +305,41 @@ export function generateEventsList(
 
   function getBoosterRateAtTime(timestamp) {
     const passedBps = Math.round((parseFloat(boosterRate) || 0.5) * 100);
-    if (passedBps <= 50) return 50;
-    if (boosterEligibilityTimestamp > 0 && timestamp <= boosterEligibilityTimestamp) return 50;
-
-    let refs5 = 0, refs10 = 0, refs15 = 0, refs20 = 0, refs25 = 0;
-    let activeDep = 0;
-    activeDepositsList.forEach(dep => { if (dep.timestamp <= timestamp) activeDep += dep.amount; });
-
-    for (const d of directsData) {
-      if (d.registrationTime >= timestamp) continue;
-      if (d.registrationTime > regTime + 25 * ONE_DAY_SECS) continue;
-
-      if (d.totalDeposits >= activeDep && activeDep > 0) {
-        if (d.registrationTime >= regTime) {
-          const diff = d.registrationTime - regTime;
-          if (diff <= 5 * ONE_DAY_SECS) refs5++;
-          if (diff <= 10 * ONE_DAY_SECS) refs10++;
-          if (diff <= 15 * ONE_DAY_SECS) refs15++;
-          if (diff <= 20 * ONE_DAY_SECS) refs20++;
-          if (diff <= 25 * ONE_DAY_SECS) refs25++;
-        }
-      }
-    }
-
-    let calculatedRate = 50;
-    if (refs25 >= 10) calculatedRate = 400;
-    else if (refs20 >= 8) calculatedRate = 250;
-    else if (refs15 >= 6) calculatedRate = 200;
-    else if (refs10 >= 4) calculatedRate = 150;
-    else if (refs5 >= 2) calculatedRate = 100;
+    if (regTime === 0 || regTime > timestamp) return 50;
 
     if (directsData && directsData.length > 0) {
-      if (calculatedRate <= 50) return 50;
-      return Math.min(passedBps, calculatedRate);
+      let refs5 = 0, refs10 = 0, refs15 = 0, refs20 = 0, refs25 = 0;
+      const sponsorFirstDeposit = activeDepositsList.length > 0
+        ? activeDepositsList[0].amount
+        : (parseFloat(totalDeposits) || 0);
+
+      for (const d of directsData) {
+        if (d.registrationTime > timestamp) continue;
+        if (d.registrationTime > regTime + 25 * ONE_DAY_SECS) continue;
+
+        if (sponsorFirstDeposit > 0 && d.totalDeposits >= sponsorFirstDeposit) {
+          if (d.registrationTime >= regTime) {
+            const diff = d.registrationTime - regTime;
+            if (diff <= 5 * ONE_DAY_SECS) refs5++;
+            if (diff <= 10 * ONE_DAY_SECS) refs10++;
+            if (diff <= 15 * ONE_DAY_SECS) refs15++;
+            if (diff <= 20 * ONE_DAY_SECS) refs20++;
+            if (diff <= 25 * ONE_DAY_SECS) refs25++;
+          }
+        }
+      }
+
+      let calculatedRate = 50;
+      if (refs25 >= 10) calculatedRate = 400;
+      else if (refs20 >= 8) calculatedRate = 250;
+      else if (refs15 >= 6) calculatedRate = 200;
+      else if (refs10 >= 4) calculatedRate = 150;
+      else if (refs5 >= 2) calculatedRate = 100;
+
+      return calculatedRate;
     }
 
-    return passedBps;
+    return passedBps > 50 ? passedBps : 50;
   }
 
   function _calcDepositPendingROI(dep, isFirstDeposit, runningLifetimeIncome, maxNetworkCap, boosterRateAtTick) {
@@ -366,7 +349,7 @@ export function generateEventsList(
 
     const baseRateBps = 50;
     const totalDailyAccrued = (dep.amount * baseRateBps) / 10000;
-    
+
     let boosterRateBps = 0;
     if (isFirstDeposit && boosterRateAtTick > 50) {
       boosterRateBps = boosterRateAtTick - 50;
@@ -413,29 +396,29 @@ export function generateEventsList(
     for (let i = 0; i < activeDepositsList.length; i++) {
       let dep = activeDepositsList[i];
       if (!dep.active) continue;
-      
+
       if (dep.lastUpdateROI + ONE_DAY_SECS === timestamp) {
         const isFirstDeposit = (i === 0);
         let boosterRateAtTick = 50;
         if (isFirstDeposit) {
           boosterRateAtTick = Math.max(50, getBoosterRateAtTime(timestamp));
         }
-        
+
         const maxNetworkCap = currentDeposit * 4.0;
         const res = _calcDepositPendingROI(dep, isFirstDeposit, cumulativeTotalEarned, maxNetworkCap, boosterRateAtTick);
-        
+
         if (res.usedCap > 0) {
           dep.lastUpdateROI = timestamp;
           dep.dailyEarned += res.pDaily;
           dep.boosterEarned += res.pBooster;
           cumulativeTotalEarned += res.usedCap;
-          
+
           if (res.pDaily > 0) {
             if (targetDailyROI > 0 && accumulatedDailyROI + res.pDaily > targetDailyROI + 0.001) {
               // Target reached
             } else {
               accumulatedDailyROI += res.pDaily;
-              
+
               ledger.push({
                 type: "roi",
                 typeName: "Daily ROI Payout",
@@ -450,15 +433,13 @@ export function generateEventsList(
               });
             }
           }
-          
+
           if (res.pBooster > 0) {
-            if (boosterEligibilityTimestamp > 0 && timestamp <= boosterEligibilityTimestamp) {
-              // Do not emit booster_roi event for interval that created or preceded eligibility
-            } else if (targetBoosterROI > 0 && accumulatedBoosterROI + res.pBooster > targetBoosterROI + 0.001) {
+            if (targetBoosterROI > 0 && accumulatedBoosterROI + res.pBooster > targetBoosterROI + 0.001) {
               // Stop emitting Booster ROI events once reconstructed total reaches contract target
             } else {
               accumulatedBoosterROI += res.pBooster;
-              
+
               ledger.push({
                 type: "booster_roi",
                 typeName: "Booster ROI Yield",
@@ -474,7 +455,7 @@ export function generateEventsList(
             }
           }
           updateActiveDeposits();
-          
+
           replayLogs.push({
             timestamp: timestamp,
             event: "ROI Accrued",
@@ -496,18 +477,18 @@ export function generateEventsList(
   function processPerformance(timestamp, bonus, isSimulated = false) {
     if (bonus.accumulatedDays >= 30) return;
     if (bonus.accumulatedAmount >= 30 * bonus.dailyRate - 0.0001) return;
-    
+
     const maxNetworkCap = currentDeposit * 4.0;
     if (cumulativeTotalEarned >= maxNetworkCap - 0.0001) return;
-    
+
     let amt = bonus.dailyRate;
     const remStreamCap = Math.max(0, (30 * bonus.dailyRate) - bonus.accumulatedAmount);
     amt = Math.min(amt, remStreamCap);
-    
+
     const remNetCap = Math.max(0, maxNetworkCap - cumulativeTotalEarned);
     amt = Math.min(amt, remNetCap);
     amt = Math.round(amt * 1e8) / 1e8;
-    
+
     if (amt > 0) {
       if (targetPerf > 0 && accumulatedPerf + amt > targetPerf + 0.001) {
         // Target reached: advance nextTick to ensure loop progresses
@@ -519,7 +500,7 @@ export function generateEventsList(
         bonus.lastClaimTime = timestamp;
         cumulativeTotalEarned += amt;
         accumulatedPerf += amt;
-        
+
         ledger.push({
           type: "perf_daily",
           typeName: "Performance Daily Salary",
@@ -552,7 +533,7 @@ export function generateEventsList(
       let nextTick = end + 1;
       let tickType = null;
       let tickData = null;
-      
+
       // Find closest ROI tick
       for (const dep of activeDepositsList) {
         if (!dep.active) continue;
@@ -562,7 +543,7 @@ export function generateEventsList(
           tickType = 'ROI';
         }
       }
-      
+
       // Find closest Performance tick
       for (const bonus of activeBonusesList) {
         if (bonus.accumulatedDays >= 30) continue;
@@ -572,7 +553,7 @@ export function generateEventsList(
           tickData = bonus;
         }
       }
-      
+
       if (nextTick > end || nextTick <= currentTime) {
         if (nextTick <= currentTime && nextTick <= end) {
           if (tickType === 'PERFORMANCE' && tickData) {
@@ -581,9 +562,9 @@ export function generateEventsList(
         }
         break;
       }
-      
+
       currentTime = nextTick;
-      
+
       if (tickType === 'ROI') {
         processROI(currentTime, isPending);
       } else if (tickType === 'PERFORMANCE') {
@@ -600,7 +581,7 @@ export function generateEventsList(
         : 0;
       const packageStartIncome = prevPackageEnd;
       const packageEndIncome = packageStartIncome + (evt.amount * 2.2);
-      
+
       activeDepositsList.push({
         index: activeDepositsList.length,
         amount: evt.amount,
@@ -615,7 +596,7 @@ export function generateEventsList(
       });
       updateActiveDeposits();
       ledger.push(evt);
-    } 
+    }
     else if (evt.type === 'withdraw') {
       ledger.push(evt);
     }
@@ -630,12 +611,12 @@ export function generateEventsList(
         if (evt.type === 'level_income') accumulatedLevelIncome += amt;
         else if (evt.type === 'level_roi') accumulatedLevelROI += amt;
         else accumulatedPerf += amt;
-        
+
         updateActiveDeposits();
         ledger.push(evt);
       }
     }
-    
+
     replayLogs.push({
       timestamp: evt.timestamp,
       event: evt.type,
@@ -756,9 +737,40 @@ export function generateEventsList(
 
   const isValid = validationErrors.length === 0;
 
+  // Determine current active booster tier metadata
+  const nowTimestamp = Math.floor(Date.now() / 1000);
+  const currentBoosterBps = getBoosterRateAtTime(nowTimestamp);
+  let tierName = "Standard";
+  let rateText = "0.50% Daily ROI";
+
+  if (currentBoosterBps >= 400) {
+    tierName = "Tier 5";
+    rateText = " 4.00% ";
+  } else if (currentBoosterBps >= 250) {
+    tierName = "Tier 4";
+    rateText = " 2.50% ";
+  } else if (currentBoosterBps >= 200) {
+    tierName = "Tier 3";
+    rateText = " 2.00% ";
+  } else if (currentBoosterBps >= 150) {
+    tierName = "Tier 2";
+    rateText = " 1.50% ";
+  } else if (currentBoosterBps >= 100) {
+    tierName = "Tier 1";
+    rateText = " 1.00% ";
+  }
+
+  const boosterTierInfo = {
+    tierName: tierName,
+    boosterRateBps: currentBoosterBps,
+    rateText: rateText,
+    displayText: `${tierName} (${rateText})`
+  };
+
   return {
     success: isValid,
     ledger: ledger,
+    boosterTier: boosterTierInfo,
     totals: {
       dailyROI: genDailyROI,
       boosterROI: genBoosterROI,
