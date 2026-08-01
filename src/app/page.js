@@ -1432,12 +1432,13 @@ export default function Dashboard() {
   const statsToDisplay = useMemo(() => {
     const ledger = simulationResult?.ledger || [];
 
-    // 1. Calculate individual income categories from replay-generated ledger
+    // 1. Calculate individual income & withdrawal categories from replay-generated ledger
     let replayDailyROI = 0;
     let replayBoosterROI = 0;
     let replayLevelIncome = 0;
     let replayLevelROI = 0;
     let replayPerf = 0;
+    let replayWithdrawals = 0;
 
     for (const e of ledger) {
       const amt = parseFloat(e.amount) || 0;
@@ -1451,7 +1452,15 @@ export default function Dashboard() {
         replayLevelROI += amt;
       } else if (["perf_instant", "perf_daily", "perf_claim"].includes(e.type)) {
         replayPerf += amt;
+      } else if (e.type === "withdraw") {
+        replayWithdrawals += amt;
       }
+    }
+
+    // Fallback to userData.totalWithdrawn if replayWithdrawals is 0
+    const onChainWithdrawn = parseFloat(userData?.totalWithdrawn || "0");
+    if (replayWithdrawals === 0 && onChainWithdrawn > 0) {
+      replayWithdrawals = onChainWithdrawn;
     }
 
     // Rounding to 8 decimal places for precision matching
@@ -1460,12 +1469,16 @@ export default function Dashboard() {
     replayLevelIncome = Math.round(replayLevelIncome * 1e8) / 1e8;
     replayLevelROI = Math.round(replayLevelROI * 1e8) / 1e8;
     replayPerf = Math.round(replayPerf * 1e8) / 1e8;
+    replayWithdrawals = Math.round(replayWithdrawals * 1e8) / 1e8;
 
     // Requirement 1: Total ROI = Daily ROI + Booster ROI
     const dashboardROIVal = replayDailyROI + replayBoosterROI;
 
-    // Requirement 3: Withdrawable Balance = Daily ROI + Booster ROI + Performance Bonus + Level ROI
-    const withdrawableVal = replayDailyROI + replayBoosterROI + replayPerf + replayLevelROI;
+    // Cumulative withdrawable income accrued from streams
+    const cumulativeWithdrawable = replayDailyROI + replayBoosterROI + replayPerf + replayLevelROI;
+
+    // Requirement 1 & 3: Claimable Balance = Cumulative Withdrawable Income - Total Amount Withdrawn
+    const withdrawableVal = Math.max(0, Math.round((cumulativeWithdrawable - replayWithdrawals) * 1e8) / 1e8);
 
     // Requirement 4: Total Earned = Daily ROI + Booster ROI + Level Income + Level ROI + Performance Bonus
     const totalEarnedVal = replayDailyROI + replayBoosterROI + replayLevelIncome + replayLevelROI + replayPerf;
@@ -1486,10 +1499,11 @@ export default function Dashboard() {
       rawLevelIncome: replayLevelIncome,
       rawLevelROI: replayLevelROI,
       rawPerf: replayPerf,
+      rawWithdrawals: replayWithdrawals,
       rawWithdrawable: withdrawableVal,
       rawTotalEarned: totalEarnedVal
     };
-  }, [simulationResult]);
+  }, [simulationResult, userData?.totalWithdrawn]);
 
   const lifetimeTeamVol = useMemo(() => {
     if (!treeNodes || !walletAddress) return parseFloat(userData.totalTeamVolume || "0");
@@ -1518,22 +1532,12 @@ export default function Dashboard() {
     return Math.max(total, parseFloat(userData.totalTeamVolume || "0"));
   }, [treeNodes, walletAddress, userData.totalTeamVolume]);
 
-  const totalAvailableBalance = parseFloat(statsToDisplay.totalAvailable).toFixed(2);
-  const totalEarnedAcrossStreams = (
-    parseFloat(statsToDisplay.totalROI || "0") +
-    parseFloat(statsToDisplay.levelIncome || "0") +
-    parseFloat(statsToDisplay.levelROI || "0") +
-    parseFloat(statsToDisplay.performance || "0") +
-    parseFloat(statsToDisplay.pendingPerformance || "0")
-  ).toFixed(2);
-  const currentRoiEarned = parseFloat(statsToDisplay.roiUsed || statsToDisplay.totalEarned || "0");
-  const roiCapPercent = statsToDisplay.roiPercentUsed !== undefined
-    ? parseFloat(statsToDisplay.roiPercentUsed)
-    : (maxRoiCap > 0 ? Math.min((currentRoiEarned / maxRoiCap) * 100, 100) : 0);
-  const currentNetworkEarned = parseFloat(statsToDisplay.networkUsed || statsToDisplay.totalEarned || "0");
-  const networkCapPercent = statsToDisplay.networkPercentUsed !== undefined
-    ? parseFloat(statsToDisplay.networkPercentUsed)
-    : (maxNetworkCap > 0 ? Math.min((currentNetworkEarned / maxNetworkCap) * 100, 100) : 0);
+  const totalAvailableBalance = statsToDisplay.totalAvailable;
+  const totalEarnedAcrossStreams = statsToDisplay.totalEarned;
+  const currentRoiEarned = statsToDisplay.rawDailyROI + statsToDisplay.rawBoosterROI;
+  const roiCapPercent = maxRoiCap > 0 ? Math.min((currentRoiEarned / maxRoiCap) * 100, 100) : 0;
+  const currentNetworkEarned = statsToDisplay.rawTotalEarned;
+  const networkCapPercent = maxNetworkCap > 0 ? Math.min((currentNetworkEarned / maxNetworkCap) * 100, 100) : 0;
 
   const filteredTxs = useMemo(() => {
     return txs.filter(tx => {
