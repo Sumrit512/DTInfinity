@@ -1173,28 +1173,38 @@ export default function Dashboard() {
       return;
     }
 
-    const withdrawAmount = statsToDisplay.rawWithdrawable;
-
-    if (withdrawAmount <= 0) {
-      alert("No available rewards to claim");
-      return;
-    }
-
     try {
       setLoading(true);
       const provider = new ethers.BrowserProvider(window.ethereum);
       const signer = await provider.getSigner();
       const dtContract = new ethers.Contract(dtInfinityAddress, DT_INFINITY_ABI, signer);
 
-      let onChainClaimableWei = 0n;
+      let maxWithdrawableWei = 0n;
       try {
-        const userInfo = await dtContract.getUserBasicInfo(walletAddress);
-        onChainClaimableWei = userInfo.claimableBalance || 0n;
-      } catch (_) { }
+        const stats = await dtContract.getDashboardStats(walletAddress);
+        maxWithdrawableWei = stats.dashboardClaimableBalance || 0n;
+        if (maxWithdrawableWei === 0n) {
+          const info = await dtContract.getUserBasicInfo(walletAddress);
+          const pending = await dtContract.getPendingBalances(walletAddress);
+          maxWithdrawableWei = (info.claimableBalance || 0n) +
+                               (pending.pendingDaily || 0n) +
+                               (pending.pendingBooster || 0n) +
+                               (pending.pendingPerf || 0n);
+        }
+      } catch (err) {
+        console.warn("Could not fetch on-chain dashboard stats, falling back to replay withdrawable", err);
+      }
 
-      let withdrawAmountWei = ethers.parseUnits(withdrawAmount.toFixed(18), 18);
-      if (onChainClaimableWei > 0n && withdrawAmountWei > onChainClaimableWei) {
-        withdrawAmountWei = onChainClaimableWei;
+      const replayAmount = statsToDisplay.rawWithdrawable || 0;
+      let withdrawAmountWei = ethers.parseUnits(replayAmount.toFixed(18), 18);
+
+      if (maxWithdrawableWei > 0n) {
+        withdrawAmountWei = maxWithdrawableWei;
+      }
+
+      if (withdrawAmountWei <= 0n) {
+        alert("No available rewards to claim");
+        return;
       }
 
       let tx;
