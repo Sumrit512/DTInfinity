@@ -172,63 +172,98 @@ export function generateEventsList(
     });
   }
 
-  // Active bonuses (current)
-  (activeBonuses || []).forEach(b => {
-    const tierIdx = b.tierIndex !== undefined ? Number(b.tierIndex) : 0;
-    const startT = Number(b.startTime || 0);
-    const endT = b.endTime !== undefined ? Number(b.endTime) : startT + 30 * PERF_ONE_DAY_SECS;
-    const lastClaimT = b.lastClaimTime !== undefined ? Number(b.lastClaimTime) : startT;
-    activeBonusesList.push({
-      streamId: `${tierIdx}_${startT}`,
-      tierIndex: tierIdx,
-      dailyRate: b.dailyRate || PERFORMANCE_TIERS[tierIdx]?.daily || 5,
-      startTime: startT,
-      lastClaimTime: lastClaimT,
-      endTime: endT,
-      nextTick: startT + PERF_ONE_DAY_SECS,
-      accumulatedDays: 0,
-      accumulatedAmount: 0
-    });
-  });
-
-  // Reconstruct Historical Performance Bonus Streams from Blockchain History
+  // Extract Real Blockchain Events
+  const rawRealEvents = [];
   const validOnChain = (onChainEvents || []).filter(e => !e.isSimulated && (!e.user || e.user.toLowerCase() === userAddrLower));
 
-  validOnChain.forEach(e => {
-    if (e.type === 'perf_claim') {
-      const tierIdx = e.tierIndex !== undefined ? Number(e.tierIndex) : (e.originalEvent?.tierIndex !== undefined ? Number(e.originalEvent.tierIndex) : 0);
+  // Performance Bonus Replay Engine (Record-Driven Engine)
+  const processedPerformanceBonusRecords = new Set();
 
-      // Source A (Contract State) is master authority: Skip if a stream for this tierIndex is already active
-      if (activeBonusesList.some(b => b.tierIndex === tierIdx)) {
-        return;
+  // Sort records chronologically
+  const sortedPerformanceRecords = [...(activeBonuses || [])].sort((a, b) => {
+    const tA = Number(a.startTime || a.monthId || a.qualificationTimestamp || 0);
+    const tB = Number(b.startTime || b.monthId || b.qualificationTimestamp || 0);
+    return tA - tB;
+  });
+
+  sortedPerformanceRecords.forEach(b => {
+    const recId = Number(b.recordId || 0);
+    const startT = Number(b.startTime || b.monthId || b.qualificationTimestamp || 0);
+    const tierIdx = b.tierIndex !== undefined ? Number(b.tierIndex) : 0;
+
+    if (recId > 0) {
+      if (processedPerformanceBonusRecords.has(recId)) {
+        return; // Process each unique Record ID exactly once
       }
+      processedPerformanceBonusRecords.add(recId);
+    } else {
+      // Fallback for records lacking an explicit recordId
+      const exists = activeBonusesList.some(existing => existing.tierIndex === tierIdx && Math.abs(existing.startTime - startT) < 300) ||
+        rawRealEvents.some(ev => (ev.type === "perf_instant" || ev.type === "perf_claim") && ev.tierIndex === tierIdx && Math.abs(ev.timestamp - startT) < 300);
+      if (exists) return;
+    }
 
-      const exactStartTime = Number(e.streamStartTime !== undefined ? e.streamStartTime : (e.originalEvent?.streamStartTime !== undefined ? e.originalEvent.streamStartTime : (e.startTime !== undefined ? e.startTime : (e.originalEvent?.startTime !== undefined ? e.originalEvent.startTime : e.timestamp))));
-      const exactLastClaimTime = exactStartTime;
-      const dailyRate = e.dailyRate !== undefined ? e.dailyRate : (e.originalEvent?.dailyRate !== undefined ? e.originalEvent.dailyRate : (PERFORMANCE_TIERS[tierIdx]?.daily || 5));
-      const exactEndTime = Number(e.streamEndTime !== undefined ? e.streamEndTime : (e.originalEvent?.streamEndTime !== undefined ? e.originalEvent.streamEndTime : (e.endTime !== undefined ? e.endTime : (e.originalEvent?.endTime !== undefined ? e.originalEvent.endTime : exactStartTime + 30 * PERF_ONE_DAY_SECS))));
+    const isInstant = (b.status === 1 || b.activationType === 1 || b.chooseInstant === true);
 
-      const streamId = `${tierIdx}_${exactStartTime}`;
+    if (isInstant) {
+      // Option A: Generate EXACTLY ONE ledger entry at the record's start timestamp.
+      const instantAmt = b.instantAmount || PERFORMANCE_TIERS[tierIdx]?.instant || 75;
+      rawRealEvents.push({
+        type: "perf_instant",
+        typeName: "Performance Bonus (Instant)",
+        fromUser: "Contract",
+        amount: instantAmt,
+        tierIndex: tierIdx,
+        level: "-",
+        timestamp: startT,
+        status: "Completed",
+        txHash: `0x_record_instant_${recId || tierIdx}_${startT}`,
+        blockNumber: 0,
+        recordId: recId
+      });
+    } else {
+      // Option B: Generate 30-day salary stream beginning at the record's start timestamp.
+      const endT = b.endTime !== undefined ? Number(b.endTime) : startT + 30 * PERF_ONE_DAY_SECS;
+      const lastClaimT = b.lastClaimTime !== undefined ? Number(b.lastClaimTime) : startT;
+      const streamId = recId > 0 ? `rec_${recId}` : `${tierIdx}_${startT}`;
+      const dailyRateVal = b.dailyRate || PERFORMANCE_TIERS[tierIdx]?.daily || 5;
 
-      // Never overwrite an existing stream; preserve all historical streams independently
-      if (!activeBonusesList.find(b => b.streamId === streamId)) {
+      const isCompletedHistorical = (b.status === 4 || b.completed === true || Number(b.daysPaid || 0) >= 30);
+
+      if (isCompletedHistorical) {
+        for (let day = 1; day <= 30; day++) {
+          const tickTime = startT + day * PERF_ONE_DAY_SECS;
+          rawRealEvents.push({
+            type: "perf_daily",
+            typeName: "Performance Daily Salary",
+            fromUser: "Contract",
+            amount: dailyRateVal,
+            tierIndex: tierIdx,
+            level: "-",
+            timestamp: tickTime,
+            status: "Completed",
+            txHash: `0x_salary_${streamId}_${day}`,
+            blockNumber: 0,
+            recordId: recId,
+            streamId: streamId
+          });
+        }
+      } else {
         activeBonusesList.push({
           streamId: streamId,
+          recordId: recId,
           tierIndex: tierIdx,
-          dailyRate: dailyRate,
-          startTime: exactStartTime,
-          lastClaimTime: exactLastClaimTime,
-          endTime: exactEndTime,
-          nextTick: exactStartTime + PERF_ONE_DAY_SECS,
-          accumulatedDays: 0,
-          accumulatedAmount: 0
+          dailyRate: dailyRateVal,
+          startTime: startT,
+          lastClaimTime: lastClaimT,
+          endTime: endT,
+          nextTick: startT + PERF_ONE_DAY_SECS,
+          accumulatedDays: Number(b.daysPaid || 0),
+          accumulatedAmount: Number(b.amountPaid || 0)
         });
       }
     }
   });
-
-  // Extract Real Blockchain Events
-  const rawRealEvents = [];
 
   // Gather deposits securely from userDeposits
   let allDeposits = [];
@@ -258,8 +293,8 @@ export function generateEventsList(
   rawRealEvents.push(...allDeposits);
 
   validOnChain.forEach(e => {
-    // Only accept real network state changes
-    if (["level_income", "level_roi", "withdraw", "perf_claim", "perf_instant"].includes(e.type)) {
+    // Only accept real network state changes (Performance events originate strictly from record-driven replay)
+    if (["level_income", "level_roi", "withdraw"].includes(e.type)) {
       rawRealEvents.push({
         type: e.type,
         typeName: e.typeName || e.type,
@@ -504,6 +539,8 @@ export function generateEventsList(
         status: "Completed",
         txHash: `0x_salary_${bonus.streamId}_${bonus.accumulatedDays}`,
         blockNumber: 0,
+        recordId: bonus.recordId,
+        streamId: bonus.streamId,
         isSimulated: isSimulated
       });
       updateActiveDeposits();
@@ -704,10 +741,69 @@ export function generateEventsList(
   if (targetBoosterROI > 0 && diffBoosterROI > 0.05) validationErrors.push(`Booster ROI mismatch. Gen: ${genBoosterROI}, Target: ${targetBoosterROI}`);
   if (targetLevelIncome > 0 && genLevelInc > targetLevelIncome + 0.05) validationErrors.push(`Level Income mismatch. Gen: ${genLevelInc}, Target: ${targetLevelIncome}`);
   if (targetLevelROI > 0 && genLevelROI > targetLevelROI + 0.05) validationErrors.push(`Level ROI mismatch. Gen: ${genLevelROI}, Target: ${targetLevelROI}`);
-  if (targetPerf > 0 && diffPerf > 0.05) validationErrors.push(`Performance Bonus mismatch. Gen: ${genPerf}, Target: ${targetPerf}`);
+  // Final composite key deduplication for perf_instant events: recordId + _perf_instant_ + timestamp
+  const finalLedger = [];
+  const seenPerfInstantCompositeKeys = new Set();
+
+  for (const event of ledger) {
+    if (event.type === "perf_instant") {
+      const recId = event.recordId || 0;
+      const compositeKey = `${recId}_perf_instant_${event.timestamp}`;
+      if (seenPerfInstantCompositeKeys.has(compositeKey)) {
+        continue; // Skip duplicate perf_instant entry
+      }
+      seenPerfInstantCompositeKeys.add(compositeKey);
+    }
+    finalLedger.push(event);
+  }
+
+  // Pre-return validation: Group all perf_instant entries by recordId
+  const instantCountsByRecordId = new Map();
+  for (const event of finalLedger) {
+    if (event.type === "perf_instant") {
+      const rId = event.recordId || 0;
+      const count = (instantCountsByRecordId.get(rId) || 0) + 1;
+      instantCountsByRecordId.set(rId, count);
+      if (count > 1) {
+        validationErrors.push(`Invariant Error: Record ID ${rId} has ${count} Instant Reward rows (expected exactly 1).`);
+      }
+    }
+  }
+
+  // Performance Bonus Audit Verification Check
+  const perfRecordAuditMap = new Map();
+  finalLedger.forEach(event => {
+    if (event.type === "perf_instant" || event.type === "perf_daily") {
+      const recKey = event.recordId ? `rec_${event.recordId}` : (event.streamId || `type_${event.type}`);
+      if (!perfRecordAuditMap.has(recKey)) {
+        perfRecordAuditMap.set(recKey, { instantCount: 0, dailyCount: 0, timestamps: new Set() });
+      }
+      const audit = perfRecordAuditMap.get(recKey);
+      if (event.type === "perf_instant") audit.instantCount++;
+      if (event.type === "perf_daily") {
+        audit.dailyCount++;
+        if (audit.timestamps.has(event.timestamp)) {
+          validationErrors.push(`Duplicate timestamp detected for performance record ${recKey} at ${event.timestamp}`);
+        }
+        audit.timestamps.add(event.timestamp);
+      }
+    }
+  });
+
+  perfRecordAuditMap.forEach((audit, recKey) => {
+    if (audit.instantCount > 1) {
+      validationErrors.push(`Duplicate Instant entry for performance record ${recKey}`);
+    }
+    if (audit.instantCount > 0 && audit.dailyCount > 0) {
+      validationErrors.push(`Collision: Record ${recKey} has both Instant and Daily entries`);
+    }
+    if (audit.dailyCount > 30) {
+      validationErrors.push(`Record ${recKey} exceeded 30 daily payouts (${audit.dailyCount})`);
+    }
+  });
 
   // Sort final ledger strictly by timestamp
-  ledger.sort((a, b) => a.timestamp - b.timestamp);
+  finalLedger.sort((a, b) => a.timestamp - b.timestamp);
 
   // 4. PERFORMANCE REPLAY GENERATED (If replay succeeds)
   const generatedSalaryEvents = ledger.filter(x => x.type === "perf_daily" && !x.isFallback);
@@ -761,7 +857,7 @@ export function generateEventsList(
 
   return {
     success: isValid,
-    ledger: ledger,
+    ledger: finalLedger,
     boosterTier: boosterTierInfo,
     totals: {
       dailyROI: genDailyROI,

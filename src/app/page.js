@@ -789,74 +789,69 @@ export default function Dashboard() {
         let rawActiveBonuses = [];
         let replaySource = "Fallback";
 
+        if (rawPerformanceRecords && rawPerformanceRecords.length > 0) {
+          bonusesMapped = rawPerformanceRecords
+            .filter(r => Number(r.status || 0) >= 1)
+            .map(r => {
+              const dailyRateVal = parseFloat(ethers.formatUnits(r.dailyRate || 0n, 18));
+              const startT = Number(r.streamStartTimestamp || r.monthId || 0n);
+              const scheduledInts = Number(r.scheduledIntervals || 30);
+              const intervalSecs = Number(r.intervalSeconds || 480);
+              const endT = Number(r.streamEndTimestamp || (startT + scheduledInts * intervalSecs));
+              const tIdx = Number(r.tierIndex || 0);
+              return {
+                recordId: Number(r.recordId || 0),
+                tierIndex: tIdx,
+                dailyRate: dailyRateVal > 0 ? dailyRateVal : (PERFORMANCE_TIERS[tIdx]?.daily || 5.0),
+                instantAmount: parseFloat(ethers.formatUnits(r.instantAmount || 0n, 18)),
+                status: Number(r.status || 0),
+                activationType: Number(r.activationType || 0),
+                startTime: startT,
+                endTime: endT,
+                lastClaimTime: startT,
+                fromRecords: true
+              };
+            });
+          if (bonusesMapped.length > 0) {
+            replaySource = "PerformanceBonusRecords";
+          }
+        }
+
         try {
           if (typeof dtContract.getActiveBonuses === "function") {
             rawActiveBonuses = await dtContract.getActiveBonuses(addr);
+            if (rawActiveBonuses && rawActiveBonuses.length > 0) {
+              rawActiveBonuses.forEach(b => {
+                const dailyRateVal = parseFloat(ethers.formatUnits(b.dailyRate || 0n, 18));
+                let tierIndex = 0;
+                for (let t = 0; t < PERFORMANCE_TIERS.length; t++) {
+                  if (Math.abs(PERFORMANCE_TIERS[t].daily - dailyRateVal) < 0.1) {
+                    tierIndex = t;
+                    break;
+                  }
+                }
+                const startT = Number(b.startTime || 0n);
+                const exists = bonusesMapped.some(x => x.tierIndex === tierIndex && Math.abs(x.startTime - startT) < 86400);
+                if (!exists) {
+                  bonusesMapped.push({
+                    tierIndex,
+                    dailyRate: dailyRateVal,
+                    startTime: startT,
+                    endTime: Number(b.endTime || 0n),
+                    lastClaimTime: Number(b.lastClaimTime || 0n),
+                    fromRecords: false
+                  });
+                }
+              });
+              if (replaySource === "Fallback") {
+                replaySource = "ActiveBonuses";
+              }
+            }
           }
         } catch (e) {
           console.warn("Could not read active bonuses", e);
         }
 
-        const streamSet = new Set();
-        let combinedStreams = [];
-
-        if (rawActiveBonuses && rawActiveBonuses.length > 0) {
-          rawActiveBonuses.forEach(b => {
-            const dailyRateVal = parseFloat(ethers.formatUnits(b.dailyRate || 0n, 18));
-            let tierIndex = 0;
-            for (let t = 0; t < PERFORMANCE_TIERS.length; t++) {
-              if (Math.abs(PERFORMANCE_TIERS[t].daily - dailyRateVal) < 0.1) {
-                tierIndex = t;
-                break;
-              }
-            }
-            const startTime = Number(b.startTime || 0n);
-            const key = `${tierIndex}_${startTime}`;
-            if (!streamSet.has(key)) {
-              streamSet.add(key);
-              combinedStreams.push({
-                tierIndex,
-                dailyRate: dailyRateVal,
-                startTime,
-                endTime: Number(b.endTime || 0n),
-                lastClaimTime: Number(b.lastClaimTime || 0n),
-                fromRecords: false
-              });
-            }
-          });
-          if (combinedStreams.length > 0) {
-            replaySource = "ActiveBonuses";
-          }
-        }
-
-        if (rawPerformanceRecords && rawPerformanceRecords.length > 0) {
-          rawPerformanceRecords.forEach(r => {
-            const dailyRateVal = parseFloat(ethers.formatUnits(r.dailyRate || 0n, 18));
-            const startT = Number(r.streamStartTimestamp || r.monthId || 0n);
-            const scheduledInts = Number(r.scheduledIntervals || 30);
-            const intervalSecs = Number(r.intervalSeconds || 480);
-            const endT = Number(r.streamEndTimestamp || (startT + scheduledInts * intervalSecs));
-            const tierIdx = Number(r.tierIndex || 0);
-            const key = `${tierIdx}_${startT}`;
-
-            if (!streamSet.has(key)) {
-              streamSet.add(key);
-              combinedStreams.push({
-                tierIndex: tierIdx,
-                dailyRate: dailyRateVal > 0 ? dailyRateVal : 5.0,
-                startTime: startT,
-                endTime: endT,
-                lastClaimTime: startT,
-                fromRecords: true
-              });
-            }
-          });
-          if (replaySource === "Fallback" && combinedStreams.length > 0) {
-            replaySource = "PerformanceBonusRecords";
-          }
-        }
-
-        bonusesMapped = combinedStreams;
         setActiveBonuses(bonusesMapped);
 
         // 1. Required Debug Console Log
@@ -1348,58 +1343,10 @@ export default function Dashboard() {
   }, [dbTreeNodes, walletAddress, walletConnected, isRegistered]);
 
   const effectiveActiveBonuses = useMemo(() => {
-    // Identify performance tiers that have already been claimed via Instant Payment Option (perf_instant)
-    const instantClaimedTiers = new Set();
-    (dbLedger || []).forEach(e => {
-      if (e.type === "perf_instant") {
-        if (e.tierIndex !== undefined && e.tierIndex !== null) {
-          instantClaimedTiers.add(Number(e.tierIndex));
-        } else {
-          PERFORMANCE_TIERS.forEach((t, idx) => {
-            if (Math.abs((parseFloat(e.amount) || 0) - t.instant) < 0.01) {
-              instantClaimedTiers.add(idx);
-            }
-          });
-        }
-      }
-    });
-
     const list = [];
-    const seenTiers = new Set();
+    const processedRecordIds = new Set();
 
-    (activeBonuses || []).forEach(b => {
-      if (b.tierIndex !== undefined && instantClaimedTiers.has(Number(b.tierIndex))) return;
-      const tierKey = b.tierIndex !== undefined ? Number(b.tierIndex) : null;
-      if (tierKey !== null && seenTiers.has(tierKey)) return;
-      if (tierKey !== null) seenTiers.add(tierKey);
-
-      const isDup = list.some(existing =>
-        Math.abs(existing.startTime - b.startTime) < 300
-      );
-      if (!isDup) list.push(b);
-    });
-
-    // Populate active bonuses from on-chain claiming event logs (perf_claim / perf_claim_option2)
-    (dbLedger || []).forEach(e => {
-      if (e.type === "perf_claim" && e.tierIndex !== undefined) {
-        const tier = Number(e.tierIndex);
-        if (instantClaimedTiers.has(tier) || seenTiers.has(tier)) return;
-        seenTiers.add(tier);
-        const rate = PERFORMANCE_TIERS[tier]?.daily || 5;
-        list.push({
-          tierIndex: tier,
-          dailyRate: e.dailyRate !== undefined ? e.dailyRate : rate,
-          startTime: e.streamStartTime !== undefined ? e.streamStartTime : e.timestamp,
-          endTime: e.streamEndTime !== undefined ? e.streamEndTime : e.timestamp + 30 * Number(perfOneDay),
-          lastClaimTime: e.streamStartTime !== undefined ? e.streamStartTime : e.timestamp
-        });
-      }
-    });
-
-    const nowUnix = Math.floor(Date.now() / 1000);
     const userDepNum = parseFloat(userData.totalDeposits || "0");
-    const regTimeNum = Number(userData.registrationTime || 0);
-
     const totalEarnedSoFar = parseFloat(userData.levelIncomeEarned || "0") +
       parseFloat(userData.levelROIEarned || "0") +
       parseFloat(userData.performanceBonusEarned || "0") +
@@ -1410,17 +1357,38 @@ export default function Dashboard() {
       return [];
     }
 
+    // Sort records chronologically
+    const sortedRecords = [...(activeBonuses || [])].sort((a, b) => {
+      const tA = Number(a.startTime || a.monthId || 0);
+      const tB = Number(b.startTime || b.monthId || 0);
+      return tA - tB;
+    });
+
+    sortedRecords.forEach(b => {
+      const recId = Number(b.recordId || 0);
+      if (recId > 0) {
+        if (processedRecordIds.has(recId)) return;
+        processedRecordIds.add(recId);
+        list.push(b);
+      } else {
+        const startT = Number(b.startTime || b.monthId || 0);
+        const isDup = list.some(existing => existing.tierIndex === b.tierIndex && Math.abs(existing.startTime - startT) < 300);
+        if (!isDup) list.push(b);
+      }
+    });
+
+    const nowUnix = Math.floor(Date.now() / 1000);
     (pendingQualifications || []).forEach(qual => {
       const claimTimeNum = Number(qual.claimTime);
       const endClaimTime = claimTimeNum + Number(perfOneDay);
       const isExpired = nowUnix >= endClaimTime;
       if (isExpired && !qual.isCappedAtStart && userDepNum >= 50) {
         const tier = Number(qual.tierIndex);
-        if (!instantClaimedTiers.has(tier) && !seenTiers.has(tier)) {
-          seenTiers.add(tier);
+        const isDup = list.some(existing => existing.tierIndex === tier && Math.abs(existing.startTime - claimTimeNum) < 300);
+        if (!isDup) {
           list.push({
             tierIndex: tier,
-            dailyRate: PERFORMANCE_TIERS[tier].daily,
+            dailyRate: PERFORMANCE_TIERS[tier]?.daily || 5,
             startTime: claimTimeNum,
             endTime: claimTimeNum + 30 * Number(perfOneDay),
             lastClaimTime: claimTimeNum
@@ -1429,8 +1397,8 @@ export default function Dashboard() {
       }
     });
 
-    return list.filter(b => b.tierIndex === undefined || !instantClaimedTiers.has(Number(b.tierIndex)));
-  }, [activeBonuses, pendingQualifications, perfOneDay, userData.totalDeposits, userData.registrationTime, dbLedger]);
+    return list;
+  }, [activeBonuses, pendingQualifications, perfOneDay, userData.totalDeposits, userData.registrationTime]);
 
   const simulationResult = useMemo(() => {
     const ledger = dbLedger || [];
@@ -1611,7 +1579,7 @@ export default function Dashboard() {
         if (filterType === "booster_roi" && tx.type !== "booster_roi") return false;
         if (filterType === "level_income" && tx.type !== "level_income") return false;
         if (filterType === "level_roi" && tx.type !== "level_roi") return false;
-        if (["performance", "perf_daily", "perf_instant", "perf_claim"].includes(filterType) && !["perf_instant", "perf_daily", "perf_claim", "perf_fallback"].includes(tx.type)) return false;
+        if (filterType === "performance" && !["perf_instant", "perf_daily", "perf_claim"].includes(tx.type)) return false;
       }
 
       if (filterLevel !== "all" && tx.level.toString() !== filterLevel) return false;
