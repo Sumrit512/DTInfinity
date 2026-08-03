@@ -1209,11 +1209,11 @@ export default function Dashboard() {
 
       let tx;
       try {
-        tx = await dtContract.withdraw(withdrawAmountWei, { gasLimit: 500000n });
+        tx = await dtContract.withdraw(withdrawAmountWei, { gasLimit: 1000000n });
       } catch (withdrawErr) {
         console.warn("withdraw(amount) failed, attempting fallback claimAll():", withdrawErr);
         try {
-          tx = await dtContract.claimAll({ gasLimit: 500000n });
+          tx = await dtContract.claimAll({ gasLimit: 1000000n });
         } catch (claimAllErr) {
           throw withdrawErr;
         }
