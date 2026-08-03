@@ -1471,6 +1471,7 @@ export default function Dashboard() {
     let replayLevelIncome = 0;
     let replayLevelROI = 0;
     let replayPerf = 0;
+    let replayPerfDaily = 0;
     let replayWithdrawals = 0;
 
     for (const e of ledger) {
@@ -1485,6 +1486,9 @@ export default function Dashboard() {
         replayLevelROI += amt;
       } else if (["perf_instant", "perf_daily", "perf_claim"].includes(e.type)) {
         replayPerf += amt;
+        if (e.type === "perf_daily") {
+          replayPerfDaily += amt;
+        }
       } else if (e.type === "withdraw") {
         replayWithdrawals += amt;
       }
@@ -1502,13 +1506,14 @@ export default function Dashboard() {
     replayLevelIncome = Math.round(replayLevelIncome * 1e8) / 1e8;
     replayLevelROI = Math.round(replayLevelROI * 1e8) / 1e8;
     replayPerf = Math.round(replayPerf * 1e8) / 1e8;
+    replayPerfDaily = Math.round(replayPerfDaily * 1e8) / 1e8;
     replayWithdrawals = Math.round(replayWithdrawals * 1e8) / 1e8;
 
     // Requirement 1: Total ROI = Daily ROI + Booster ROI
     const dashboardROIVal = replayDailyROI + replayBoosterROI;
 
-    // Cumulative withdrawable income accrued from streams
-    const cumulativeWithdrawable = replayDailyROI + replayBoosterROI + replayPerf + replayLevelROI;
+    // Cumulative withdrawable income accrued from streams (instant perf_instant transfers directly to wallet, not claimable balance)
+    const cumulativeWithdrawable = replayDailyROI + replayBoosterROI + replayPerfDaily + replayLevelROI;
 
     // Requirement 1 & 3: Claimable Balance = Cumulative Withdrawable Income - Total Amount Withdrawn
     const withdrawableVal = Math.max(0, Math.round((cumulativeWithdrawable - replayWithdrawals) * 1e8) / 1e8);
