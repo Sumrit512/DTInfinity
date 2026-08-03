@@ -198,6 +198,11 @@ export function generateEventsList(
     if (e.type === 'perf_claim') {
       const tierIdx = e.tierIndex !== undefined ? Number(e.tierIndex) : (e.originalEvent?.tierIndex !== undefined ? Number(e.originalEvent.tierIndex) : 0);
 
+      // Source A (Contract State) is master authority: Skip if a stream for this tierIndex is already active
+      if (activeBonusesList.some(b => b.tierIndex === tierIdx)) {
+        return;
+      }
+
       const exactStartTime = Number(e.streamStartTime !== undefined ? e.streamStartTime : (e.originalEvent?.streamStartTime !== undefined ? e.originalEvent.streamStartTime : (e.startTime !== undefined ? e.startTime : (e.originalEvent?.startTime !== undefined ? e.originalEvent.startTime : e.timestamp))));
       const exactLastClaimTime = exactStartTime;
       const dailyRate = e.dailyRate !== undefined ? e.dailyRate : (e.originalEvent?.dailyRate !== undefined ? e.originalEvent.dailyRate : (PERFORMANCE_TIERS[tierIdx]?.daily || 5));
