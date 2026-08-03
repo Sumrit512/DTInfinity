@@ -539,7 +539,7 @@ export function generateEventsList(
       // Find closest Performance tick
       for (const bonus of activeBonusesList) {
         if (bonus.accumulatedDays >= 30) continue;
-        if (bonus.nextTick <= end && bonus.nextTick < nextTick) {
+        if (bonus.nextTick <= end && bonus.nextTick <= nextTick) {
           nextTick = bonus.nextTick;
           tickType = 'PERFORMANCE';
           tickData = bonus;

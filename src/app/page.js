@@ -792,57 +792,71 @@ export default function Dashboard() {
         try {
           if (typeof dtContract.getActiveBonuses === "function") {
             rawActiveBonuses = await dtContract.getActiveBonuses(addr);
-            if (rawActiveBonuses && rawActiveBonuses.length > 0) {
-              bonusesMapped = rawActiveBonuses.map(b => {
-                const dailyRateVal = parseFloat(ethers.formatUnits(b.dailyRate || 0n, 18));
-                let tierIndex = 0;
-                for (let t = 0; t < PERFORMANCE_TIERS.length; t++) {
-                  if (Math.abs(PERFORMANCE_TIERS[t].daily - dailyRateVal) < 0.1) {
-                    tierIndex = t;
-                    break;
-                  }
-                }
-                return {
-                  tierIndex,
-                  dailyRate: dailyRateVal,
-                  startTime: Number(b.startTime || 0n),
-                  endTime: Number(b.endTime || 0n),
-                  lastClaimTime: Number(b.lastClaimTime || 0n),
-                  fromRecords: false
-                };
-              });
-              if (bonusesMapped.length > 0) {
-                replaySource = "ActiveBonuses";
-              }
-            }
           }
         } catch (e) {
           console.warn("Could not read active bonuses", e);
         }
 
-        // If getActiveBonuses() is empty, obtain replay source from getPerformanceBonusRecords()
-        if (bonusesMapped.length === 0 && rawPerformanceRecords && rawPerformanceRecords.length > 0) {
-          bonusesMapped = rawPerformanceRecords.map(r => {
+        const streamSet = new Set();
+        let combinedStreams = [];
+
+        if (rawActiveBonuses && rawActiveBonuses.length > 0) {
+          rawActiveBonuses.forEach(b => {
+            const dailyRateVal = parseFloat(ethers.formatUnits(b.dailyRate || 0n, 18));
+            let tierIndex = 0;
+            for (let t = 0; t < PERFORMANCE_TIERS.length; t++) {
+              if (Math.abs(PERFORMANCE_TIERS[t].daily - dailyRateVal) < 0.1) {
+                tierIndex = t;
+                break;
+              }
+            }
+            const startTime = Number(b.startTime || 0n);
+            const key = `${tierIndex}_${startTime}`;
+            if (!streamSet.has(key)) {
+              streamSet.add(key);
+              combinedStreams.push({
+                tierIndex,
+                dailyRate: dailyRateVal,
+                startTime,
+                endTime: Number(b.endTime || 0n),
+                lastClaimTime: Number(b.lastClaimTime || 0n),
+                fromRecords: false
+              });
+            }
+          });
+          if (combinedStreams.length > 0) {
+            replaySource = "ActiveBonuses";
+          }
+        }
+
+        if (rawPerformanceRecords && rawPerformanceRecords.length > 0) {
+          rawPerformanceRecords.forEach(r => {
             const dailyRateVal = parseFloat(ethers.formatUnits(r.dailyRate || 0n, 18));
             const startT = Number(r.streamStartTimestamp || r.monthId || 0n);
             const scheduledInts = Number(r.scheduledIntervals || 30);
             const intervalSecs = Number(r.intervalSeconds || 480);
             const endT = Number(r.streamEndTimestamp || (startT + scheduledInts * intervalSecs));
-            return {
-              tierIndex: Number(r.tierIndex || 0),
-              dailyRate: dailyRateVal > 0 ? dailyRateVal : 5.0,
-              startTime: startT,
-              endTime: endT,
-              lastClaimTime: startT,
-              fromRecords: true
-            };
-          });
+            const tierIdx = Number(r.tierIndex || 0);
+            const key = `${tierIdx}_${startT}`;
 
-          if (bonusesMapped.length > 0) {
+            if (!streamSet.has(key)) {
+              streamSet.add(key);
+              combinedStreams.push({
+                tierIndex: tierIdx,
+                dailyRate: dailyRateVal > 0 ? dailyRateVal : 5.0,
+                startTime: startT,
+                endTime: endT,
+                lastClaimTime: startT,
+                fromRecords: true
+              });
+            }
+          });
+          if (replaySource === "Fallback" && combinedStreams.length > 0) {
             replaySource = "PerformanceBonusRecords";
           }
         }
 
+        bonusesMapped = combinedStreams;
         setActiveBonuses(bonusesMapped);
 
         // 1. Required Debug Console Log
@@ -1597,7 +1611,7 @@ export default function Dashboard() {
         if (filterType === "booster_roi" && tx.type !== "booster_roi") return false;
         if (filterType === "level_income" && tx.type !== "level_income") return false;
         if (filterType === "level_roi" && tx.type !== "level_roi") return false;
-        if (filterType === "performance" && !["perf_instant", "perf_daily", "perf_claim"].includes(tx.type)) return false;
+        if (["performance", "perf_daily", "perf_instant", "perf_claim"].includes(filterType) && !["perf_instant", "perf_daily", "perf_claim", "perf_fallback"].includes(tx.type)) return false;
       }
 
       if (filterLevel !== "all" && tx.level.toString() !== filterLevel) return false;
