@@ -59,5 +59,5 @@ export const PERFORMANCE_TIERS = [
   { target: 7500, instant: 375, daily: 25 },
   { target: 12500, instant: 750, daily: 50 },
   { target: 25000, instant: 2250, daily: 150 },
-  { target: 50000, instant: 7500, daily: 500 }
+  { target: 75000, instant: 7500, daily: 500 }
 ];
