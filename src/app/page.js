@@ -820,24 +820,32 @@ export default function Dashboard() {
 
         if (rawPerformanceRecords && rawPerformanceRecords.length > 0) {
           bonusesMapped = rawPerformanceRecords
-            .filter(r => Number(r.status || 0) >= 1)
-            .map(r => {
-              const dailyRateVal = parseFloat(ethers.formatUnits(r.dailyRate || 0n, 18));
+            .filter(r => Number(r.status || 0) >= 0)
+            .map((r, i) => {
+              const rawDaily = parseFloat(ethers.formatUnits(r.dailyRate || 0n, 18));
               const startT = Number(r.streamStartTimestamp || r.monthId || 0n);
               const scheduledInts = Number(r.scheduledIntervals || 30);
               const intervalSecs = Number(r.intervalSeconds || 480);
               const endT = Number(r.streamEndTimestamp || (startT + scheduledInts * intervalSecs));
-              const tIdx = Number(r.tierIndex || 0);
+              const tIdx = Math.min(5, Math.max(0, Number(r.tierIndex || 0)));
+              const tierDef = PERFORMANCE_TIERS[tIdx] || { daily: 5.0, instant: 75.0 };
+              const dailyRateVal = rawDaily >= 0.1 ? rawDaily : tierDef.daily;
+              const cleanStartT = startT > 1704067200 ? startT : Number(r.lastClaimTimestamp || 0n);
+
+              // Sanitize BigInt record IDs if > 10,000 to prevent JS floating point precision loss
+              const cleanRecId = (r.recordId && r.recordId <= 10000n) ? Number(r.recordId) : (i + 1);
+
               return {
-                recordId: Number(r.recordId || 0),
+                recordId: cleanRecId,
+                rawRecordId: (r.recordId || 0n).toString(),
                 tierIndex: tIdx,
-                dailyRate: dailyRateVal > 0 ? dailyRateVal : (PERFORMANCE_TIERS[tIdx]?.daily || 5.0),
-                instantAmount: parseFloat(ethers.formatUnits(r.instantAmount || 0n, 18)),
+                dailyRate: dailyRateVal,
+                instantAmount: parseFloat(ethers.formatUnits(r.instantAmount || 0n, 18)) || tierDef.instant,
                 status: Number(r.status || 0),
                 activationType: Number(r.activationType || 0),
-                startTime: startT,
-                endTime: endT,
-                lastClaimTime: startT,
+                startTime: cleanStartT > 0 ? cleanStartT : Math.floor(Date.now() / 1000),
+                endTime: endT > 0 ? endT : (cleanStartT + scheduledInts * intervalSecs),
+                lastClaimTime: cleanStartT,
                 fromRecords: true
               };
             });

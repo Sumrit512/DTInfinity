@@ -97,7 +97,8 @@ export default function AchievementsView({
       if (processedKeys.has(uniqueKey)) return;
       processedKeys.add(uniqueKey);
 
-      const tierIdx = Number(b.tierIndex || 0);
+      const rawTierIdx = Number(b.tierIndex || 0);
+      const tierIdx = Math.min(5, Math.max(0, rawTierIdx));
       const tierDef = PERFORMANCE_TIERS[tierIdx] || { name: `Tier ${tierIdx + 1}`, target: 5000, instant: 75, daily: 5 };
       const isInstant = (b.activationType === 1 || b.status === 1 || b.chooseInstant === true);
       const startT = Number(b.startTime || b.monthId || b.qualificationTimestamp || 0);
