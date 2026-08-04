@@ -131,7 +131,7 @@ export default function AchievementsView({
       const startT = Number(qual.claimTime || qual.qualificationTimestamp || Math.floor(Date.now() / 1000));
       const uniqueKey = `qual_tier_${tierIdx}_${startT}`;
 
-      const existsInList = list.some(x => x.tierIndex === tierIdx && Math.abs(x.startTime - startT) < 86400);
+      const existsInList = list.some(x => x.tierIndex === tierIdx && Math.abs(x.startTime - startT) < 300);
       if (!existsInList && !processedKeys.has(uniqueKey)) {
         processedKeys.add(uniqueKey);
         const tierDef = PERFORMANCE_TIERS[tierIdx] || { name: `Tier ${tierIdx + 1}`, target: 5000, instant: 75, daily: 5 };

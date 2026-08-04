@@ -860,7 +860,7 @@ export default function Dashboard() {
                   }
                 }
                 const startT = Number(b.startTime || 0n);
-                const exists = bonusesMapped.some(x => x.tierIndex === tierIndex && Math.abs(x.startTime - startT) < 86400);
+                const exists = bonusesMapped.some(x => x.tierIndex === tierIndex && Math.abs(x.startTime - startT) < 300);
                 if (!exists) {
                   bonusesMapped.push({
                     tierIndex,
@@ -1404,7 +1404,7 @@ export default function Dashboard() {
       if (isExpired && !qual.isCappedAtStart && userDepNum >= 50) {
         const tier = Number(qual.tierIndex);
         const startT = claimTimeNum > 0 ? claimTimeNum : nowUnix;
-        const isDup = list.some(existing => existing.tierIndex === tier && Math.abs(existing.startTime - startT) < 86400);
+        const isDup = list.some(existing => existing.tierIndex === tier && Math.abs(existing.startTime - startT) < 300);
         if (!isDup) {
           list.push({
             tierIndex: tier,
