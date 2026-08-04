@@ -231,13 +231,20 @@ export function generateEventsList(
       const isCompletedHistorical = (b.status === 4 || b.completed === true || Number(b.daysPaid || 0) >= 30);
 
       if (isCompletedHistorical) {
+        let accumulatedRecordAmt = 0;
+        const maxRecordAmt = b.amountPaid !== undefined && Number(b.amountPaid) > 0 ? Number(b.amountPaid) : 30 * dailyRateVal;
         for (let day = 1; day <= 30; day++) {
+          if (accumulatedRecordAmt >= maxRecordAmt - 0.0001) break;
+          let dayAmt = Math.min(dailyRateVal, maxRecordAmt - accumulatedRecordAmt);
+          dayAmt = Math.round(dayAmt * 1e8) / 1e8;
+          accumulatedRecordAmt += dayAmt;
+
           const tickTime = startT + day * PERF_ONE_DAY_SECS;
           rawRealEvents.push({
             type: "perf_daily",
             typeName: "Performance Daily Salary",
             fromUser: "Contract",
-            amount: dailyRateVal,
+            amount: dayAmt,
             tierIndex: tierIdx,
             level: "-",
             timestamp: tickTime,
@@ -692,32 +699,45 @@ export function generateEventsList(
   let fallbackExecuted = false;
   if (existingPerfEntries.length === 0 && targetPerf > 0) {
     fallbackExecuted = true;
-    // 3. PERFORMANCE FALLBACK EXECUTED (Only if fallback triggers)
-    console.log("❌ PERFORMANCE FALLBACK EXECUTED");
-    console.log("Reason: No performance entries generated during replay and targetPerf > 0");
+    console.log("⚡ PERFORMANCE FALLBACK DAILY STREAMS GENERATED");
 
-    let fallbackTimestamp = regTime;
+    let fallbackTimestamp = regTime > 0 ? regTime + PERF_ONE_DAY_SECS : now - 30 * PERF_ONE_DAY_SECS;
     if (activeBonuses && activeBonuses.length > 0) {
       fallbackTimestamp = Number(activeBonuses[0].startTime || activeBonuses[0].time || regTime);
     } else if (userDeposits && userDeposits.length > 0) {
       fallbackTimestamp = Number(userDeposits[0].time || userDeposits[0].timestamp || regTime);
     }
 
-    ledger.push({
-      type: "perf_daily",
-      typeName: "Performance Daily Salary",
-      fromUser: "contract",
-      amount: targetPerf,
-      level: "-",
-      timestamp: fallbackTimestamp,
-      status: "Completed",
-      txHash: `fallback_perf_${userAddrLower}`,
-      blockNumber: null,
-      isSimulated: false,
-      isFallback: true
-    });
+    let remPerf = Math.round(targetPerf * 1e8) / 1e8;
+    let dailyRateVal = 500;
+    if (remPerf < 1500) dailyRateVal = 5;
+    else if (remPerf < 4500) dailyRateVal = 15;
+    else if (remPerf < 15000) dailyRateVal = 150;
 
-    accumulatedPerf = targetPerf;
+    let dayCounter = 1;
+    while (remPerf > 0.0001) {
+      let dayAmt = Math.min(dailyRateVal, remPerf);
+      dayAmt = Math.round(dayAmt * 1e8) / 1e8;
+      remPerf = Math.round((remPerf - dayAmt) * 1e8) / 1e8;
+      accumulatedPerf += dayAmt;
+      cumulativeTotalEarned += dayAmt;
+
+      ledger.push({
+        type: "perf_daily",
+        typeName: "Performance Daily Salary",
+        fromUser: "Contract",
+        amount: dayAmt,
+        level: "-",
+        timestamp: fallbackTimestamp,
+        status: "Completed",
+        txHash: `0x_fallback_salary_${dayCounter}_${fallbackTimestamp}`,
+        blockNumber: 0,
+        isFallback: true
+      });
+
+      fallbackTimestamp += PERF_ONE_DAY_SECS;
+      dayCounter++;
+    }
   }
 
   // --------------------------------------------------------------------------
@@ -805,6 +825,34 @@ export function generateEventsList(
   // Sort final ledger strictly by timestamp
   finalLedger.sort((a, b) => a.timestamp - b.timestamp);
 
+  // Strict 400% Network Cap Enforcer: Ensures total income events in ledger never exceed maxNetworkCap (400% of total deposits)
+  const maxNetworkCapVal = (parseFloat(totalDeposits) > 0 ? parseFloat(totalDeposits) : currentDeposit) * 4.0;
+  let runningIncomeSum = 0;
+  const cappedFinalLedger = [];
+
+  for (const event of finalLedger) {
+    const isIncome = ["roi", "booster_roi", "level_income", "level_roi", "perf_instant", "perf_daily"].includes(event.type);
+
+    if (isIncome) {
+      if (maxNetworkCapVal > 0 && runningIncomeSum >= maxNetworkCapVal - 0.0001) {
+        continue; // 400% Network Cap reached, skip further income events
+      }
+      const remCap = maxNetworkCapVal > 0 ? Math.max(0, maxNetworkCapVal - runningIncomeSum) : event.amount;
+      const allowedAmount = Math.min(event.amount, remCap);
+      const roundedAmount = Math.round(allowedAmount * 1e8) / 1e8;
+
+      if (roundedAmount > 0) {
+        runningIncomeSum = Math.round((runningIncomeSum + roundedAmount) * 1e8) / 1e8;
+        cappedFinalLedger.push({
+          ...event,
+          amount: roundedAmount
+        });
+      }
+    } else {
+      cappedFinalLedger.push(event);
+    }
+  }
+
   // 4. PERFORMANCE REPLAY GENERATED (If replay succeeds)
   const generatedSalaryEvents = ledger.filter(x => x.type === "perf_daily" && !x.isFallback);
   if (generatedSalaryEvents.length > 0) {
@@ -857,7 +905,7 @@ export function generateEventsList(
 
   return {
     success: isValid,
-    ledger: finalLedger,
+    ledger: cappedFinalLedger,
     boosterTier: boosterTierInfo,
     totals: {
       dailyROI: genDailyROI,
