@@ -318,21 +318,18 @@ export default function Dashboard() {
     if (typeof window !== "undefined") {
       setOrigin(window.location.origin);
       let savedDT = localStorage.getItem("DT_INFINITY_ADDRESS");
-      if (savedDT && (
-        savedDT.toLowerCase() === "0x229e2e8ef23c4e0c558c9473baaee3ff330c50b1".toLowerCase() ||
-        savedDT.toLowerCase() === "0x858b5e656355401bb099c5120715d25761a8d1c2".toLowerCase() ||
-        savedDT.toLowerCase() === "0x98D4730F214f6386a0C12626f4C87Fb4114B8ECD".toLowerCase() ||
-        savedDT.toLowerCase() === "0x03b628429b45A78ad47a922Ca6Fc7ce5515a69A1".toLowerCase() ||
-        savedDT.toLowerCase() === "0x360D67b9F9EAa887754200EEa4c8E8E368784f51".toLowerCase()
-      )) {
+      if (savedDT && savedDT.toLowerCase() !== DEFAULT_DT_INFINITY_ADDRESS.toLowerCase()) {
         localStorage.removeItem("DT_INFINITY_ADDRESS");
         localStorage.removeItem("USDT_ADDRESS");
+        localStorage.removeItem("DT_INFINITY_DEPLOYMENT_BLOCK");
+        localStorage.removeItem("treeNodes");
         savedDT = null;
       }
       const savedUSDT = localStorage.getItem("USDT_ADDRESS");
       const savedChain = localStorage.getItem("TARGET_CHAIN_ID");
       const savedBlock = localStorage.getItem("DT_INFINITY_DEPLOYMENT_BLOCK");
       if (savedDT) setDtInfinityAddress(savedDT);
+      else setDtInfinityAddress(DEFAULT_DT_INFINITY_ADDRESS);
       if (savedUSDT) setUsdtAddress(savedUSDT);
       if (savedChain) setTargetChainId(BigInt(savedChain));
       if (savedBlock) setDeploymentBlock(savedBlock);
