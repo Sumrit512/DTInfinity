@@ -8,6 +8,7 @@ export default function Sidebar({ activeView, setActiveView, sidebarOpen, setSid
     { id: "deposit", label: "Deposit USDT", icon: "💳" },
     { id: "withdraw", label: "Claim Rewards", icon: "💰" },
     { id: "network", label: "Team Network", icon: "🌳" },
+    { id: "achievements", label: "Achievements", icon: "🏆" },
     { id: "reports", label: "Reports & Logs", icon: "📑" },
   ];
 

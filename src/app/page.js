@@ -32,6 +32,7 @@ import DashboardView from "../components/views/DashboardView.js";
 import DepositView from "../components/views/DepositView.js";
 import WithdrawView from "../components/views/WithdrawView.js";
 import NetworkView from "../components/views/NetworkView.js";
+import AchievementsView from "../components/views/AchievementsView.js";
 import ReportsView from "../components/views/ReportsView.js";
 import SettingsModal from "../components/modals/SettingsModal.js";
 import MissedTxModal from "../components/modals/MissedTxModal.js";
@@ -1800,6 +1801,16 @@ export default function Dashboard() {
             setSelectedNode={setSelectedNode}
             loadTreeNode={loadTreeNode}
             setLoading={setLoading}
+          />
+        )}
+
+        {activeView === "achievements" && (
+          <AchievementsView
+            userData={userData}
+            activeBonuses={activeBonuses}
+            pendingQualifications={pendingQualifications}
+            simulationResult={simulationResult}
+            lifetimeTeamVol={lifetimeTeamVol.toFixed(2)}
           />
         )}
 
