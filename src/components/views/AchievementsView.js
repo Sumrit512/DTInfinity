@@ -14,7 +14,15 @@ export default function AchievementsView({
   const totalTeamVolNum = parseFloat(userData.totalTeamVolume || lifetimeTeamVol || "0");
   const strongestLegVolNum = parseFloat(userData.strongestLegVolume || "0");
   const weakerLegsVolNum = Math.max(0, totalTeamVolNum - strongestLegVolNum);
-  const perfEarnedNum = parseFloat(userData.performanceBonusEarned || "0");
+
+  const perfEarnedNum = useMemo(() => {
+    const simPerf = simulationResult?.totals?.performance || 0;
+    const ledgerPerf = (simulationResult?.ledger || [])
+      .filter(tx => tx.type === "perf_instant" || tx.type === "perf_daily")
+      .reduce((sum, tx) => sum + (tx.amount || 0), 0);
+    const userPerf = parseFloat(userData.performanceBonusEarned || "0");
+    return Math.max(userPerf, simPerf, ledgerPerf);
+  }, [userData.performanceBonusEarned, simulationResult]);
 
   // Map user's past & active achievements across Tier 1 to Tier 5
   const tierAchievements = useMemo(() => {
@@ -82,12 +90,12 @@ export default function AchievementsView({
   // Build granular historical audit table from simulation ledger & activeBonuses
   const historicalRecords = useMemo(() => {
     const list = [];
-    const processedIds = new Set();
+    const processedKeys = new Set();
 
     (activeBonuses || []).forEach((b, idx) => {
-      const recId = Number(b.recordId || idx + 1);
-      if (processedIds.has(recId)) return;
-      processedIds.add(recId);
+      const uniqueKey = b.recordId ? `rec_${b.recordId}` : `tier_${b.tierIndex}_${b.startTime}`;
+      if (processedKeys.has(uniqueKey)) return;
+      processedKeys.add(uniqueKey);
 
       const tierIdx = Number(b.tierIndex || 0);
       const tierDef = PERFORMANCE_TIERS[tierIdx] || { name: `Tier ${tierIdx + 1}`, target: 5000, instant: 75, daily: 5 };
@@ -102,8 +110,10 @@ export default function AchievementsView({
         amountPaid = b.amountPaid !== undefined && b.amountPaid > 0 ? b.amountPaid : 30 * (b.dailyRate || tierDef.daily);
       }
 
+      const displayId = b.recordId ? `#${b.recordId}` : `Auto-${tierIdx + 1}`;
+
       list.push({
-        recordId: recId,
+        recordId: displayId,
         tierName: tierDef.name || `Tier ${tierIdx + 1}`,
         tierIndex: tierIdx,
         targetVolume: tierDef.target,
@@ -116,8 +126,32 @@ export default function AchievementsView({
       });
     });
 
+    (pendingQualifications || []).forEach((qual) => {
+      const tierIdx = Number(qual.tierIndex || 0);
+      const startT = Number(qual.claimTime || qual.qualificationTimestamp || Math.floor(Date.now() / 1000));
+      const uniqueKey = `qual_tier_${tierIdx}_${startT}`;
+
+      const existsInList = list.some(x => x.tierIndex === tierIdx && Math.abs(x.startTime - startT) < 86400);
+      if (!existsInList && !processedKeys.has(uniqueKey)) {
+        processedKeys.add(uniqueKey);
+        const tierDef = PERFORMANCE_TIERS[tierIdx] || { name: `Tier ${tierIdx + 1}`, target: 5000, instant: 75, daily: 5 };
+        list.push({
+          recordId: `Auto-${tierIdx + 1}`,
+          tierName: tierDef.name || `Tier ${tierIdx + 1}`,
+          tierIndex: tierIdx,
+          targetVolume: tierDef.target,
+          optionChosen: "Option B (30-Day Stream)",
+          dailyRate: qual.daily || tierDef.daily,
+          amountPaid: 30 * (qual.daily || tierDef.daily),
+          startTime: startT,
+          endTime: startT + 30 * 480,
+          status: "Active Payout"
+        });
+      }
+    });
+
     return list.sort((a, b) => b.startTime - a.startTime);
-  }, [activeBonuses]);
+  }, [activeBonuses, pendingQualifications]);
 
   return (
     <div className="view active" style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
@@ -233,7 +267,7 @@ export default function AchievementsView({
 
                   return (
                     <tr key={idx} style={{ borderBottom: "1px solid var(--border)" }}>
-                      <td style={{ padding: "12px 10px", fontSize: "13px" }} className="mono">#{rec.recordId}</td>
+                      <td style={{ padding: "12px 10px", fontSize: "13px" }} className="mono">{String(rec.recordId).startsWith("#") || String(rec.recordId).startsWith("Auto") ? rec.recordId : `#${rec.recordId}`}</td>
                       <td style={{ padding: "12px 10px", fontSize: "13px", fontWeight: "600", color: "#fff" }}>{rec.tierName}</td>
                       <td style={{ padding: "12px 10px", fontSize: "13px", textAlign: "right" }} className="mono">{rec.targetVolume.toLocaleString()} USDT</td>
                       <td style={{ padding: "12px 10px", fontSize: "13px" }}>

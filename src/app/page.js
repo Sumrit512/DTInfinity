@@ -536,27 +536,55 @@ export default function Dashboard() {
       const provider = new ethers.BrowserProvider(window.ethereum);
       const dtContract = new ethers.Contract(dtInfinityAddress, DT_INFINITY_ABI, provider);
 
-      if (!dtContract?.getPendingPerformanceQualifications || typeof dtContract.getPendingPerformanceQualifications !== "function") {
-        console.warn("[PerfBonus] getPendingPerformanceQualifications not available on contract instance");
-        setPendingQualifications([]);
-        return;
+      let mapped = [];
+      try {
+        if (typeof dtContract.getPendingPerformanceQualifications === "function") {
+          const rawList = await dtContract.getPendingPerformanceQualifications(addr);
+          mapped = (rawList || []).map(q => ({
+            tierIndex: Number(q.tierIndex),
+            target: Number(ethers.formatUnits(q.target || 0n, 18)),
+            instant: Number(ethers.formatUnits(q.instant || 0n, 18)),
+            daily: Number(ethers.formatUnits(q.daily || 0n, 18)),
+            isPending: Boolean(q.isPending),
+            claimTime: Number(q.claimTime),
+            isClaimWindowActive: Boolean(q.isClaimWindowActive)
+          }));
+        }
+      } catch (e) {
+        console.warn("[PerfBonus] getPendingPerformanceQualifications error:", e);
       }
 
-      const rawList = await dtContract.getPendingPerformanceQualifications(addr);
+      // Direct fallback scanner for pendingTiers and qualificationMonth (handles expired claim windows)
+      for (let idx = 0; idx < 5; idx++) {
+        try {
+          const isPending = await dtContract.pendingTiers(addr, idx);
+          const isCapped = await dtContract.pendingTierCappedAtStart(addr, idx);
+          const qualTime = await dtContract.qualificationMonth(addr, idx);
+          const qualTimeNum = Number(qualTime || 0n);
 
-      const mapped = (rawList || []).map(q => ({
-        tierIndex: Number(q.tierIndex),
-        target: Number(ethers.formatUnits(q.target || 0n, 18)),
-        instant: Number(ethers.formatUnits(q.instant || 0n, 18)),
-        daily: Number(ethers.formatUnits(q.daily || 0n, 18)),
-        isPending: Boolean(q.isPending),
-        claimTime: Number(q.claimTime),
-        isClaimWindowActive: Boolean(q.isClaimWindowActive)
-      }));
+          if (isPending || qualTimeNum > 0) {
+            const exists = mapped.some(m => m.tierIndex === idx);
+            if (!exists) {
+              const tierDef = PERFORMANCE_TIERS[idx] || { target: 5000, instant: 75, daily: 5 };
+              mapped.push({
+                tierIndex: idx,
+                target: tierDef.target,
+                instant: tierDef.instant,
+                daily: tierDef.daily,
+                isPending: Boolean(isPending),
+                isCappedAtStart: Boolean(isCapped),
+                claimTime: qualTimeNum,
+                qualificationTimestamp: qualTimeNum,
+                isClaimWindowActive: false
+              });
+            }
+          }
+        } catch (e) {}
+      }
 
       setPendingQualifications(mapped);
       if (mapped.length > 0) {
-        console.log("[PerfBonus] Qualifications loaded from getPendingPerformanceQualifications:", mapped);
+        console.log("[PerfBonus] Qualifications loaded successfully:", mapped);
       }
     } catch (e) {
       console.error("[PerfBonus] refreshPendingQualifications error:", e);
@@ -1370,19 +1398,20 @@ export default function Dashboard() {
 
     const nowUnix = Math.floor(Date.now() / 1000);
     (pendingQualifications || []).forEach(qual => {
-      const claimTimeNum = Number(qual.claimTime);
-      const endClaimTime = claimTimeNum + Number(perfOneDay);
-      const isExpired = nowUnix >= endClaimTime;
+      const claimTimeNum = Number(qual.claimTime || qual.qualificationTimestamp || 0);
+      const endClaimTime = claimTimeNum > 0 ? claimTimeNum + Number(perfOneDay) : 0;
+      const isExpired = claimTimeNum === 0 || nowUnix >= endClaimTime || !qual.isClaimWindowActive || qual.isPending;
       if (isExpired && !qual.isCappedAtStart && userDepNum >= 50) {
         const tier = Number(qual.tierIndex);
-        const isDup = list.some(existing => existing.tierIndex === tier && Math.abs(existing.startTime - claimTimeNum) < 300);
+        const startT = claimTimeNum > 0 ? claimTimeNum : nowUnix;
+        const isDup = list.some(existing => existing.tierIndex === tier && Math.abs(existing.startTime - startT) < 86400);
         if (!isDup) {
           list.push({
             tierIndex: tier,
             dailyRate: PERFORMANCE_TIERS[tier]?.daily || 5,
-            startTime: claimTimeNum,
-            endTime: claimTimeNum + 30 * Number(perfOneDay),
-            lastClaimTime: claimTimeNum
+            startTime: startT,
+            endTime: startT + 30 * Number(perfOneDay),
+            lastClaimTime: startT
           });
         }
       }
@@ -1807,7 +1836,7 @@ export default function Dashboard() {
         {activeView === "achievements" && (
           <AchievementsView
             userData={userData}
-            activeBonuses={activeBonuses}
+            activeBonuses={effectiveActiveBonuses}
             pendingQualifications={pendingQualifications}
             simulationResult={simulationResult}
             lifetimeTeamVol={lifetimeTeamVol.toFixed(2)}

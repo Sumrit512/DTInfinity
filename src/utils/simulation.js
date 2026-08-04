@@ -590,13 +590,21 @@ export function generateEventsList(
         }
       }
 
-      if (nextTick > end || nextTick <= currentTime) {
-        if (nextTick <= currentTime && nextTick <= end) {
-          if (tickType === 'PERFORMANCE' && tickData) {
-            tickData.nextTick = currentTime + PERF_ONE_DAY_SECS;
+      if (nextTick > end) {
+        break;
+      }
+
+      if (nextTick <= currentTime) {
+        if (tickType === 'PERFORMANCE' && tickData) {
+          tickData.nextTick = currentTime + PERF_ONE_DAY_SECS;
+        } else if (tickType === 'ROI') {
+          for (const dep of activeDepositsList) {
+            if (dep.active && dep.lastUpdateROI + ONE_DAY_SECS <= currentTime) {
+              dep.lastUpdateROI = currentTime;
+            }
           }
         }
-        break;
+        continue;
       }
 
       currentTime = nextTick;
