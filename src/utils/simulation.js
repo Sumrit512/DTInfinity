@@ -620,11 +620,15 @@ export function generateEventsList(
   function replaySolidityTransaction(evt) {
     if (evt.type === 'deposit') {
       currentDeposit += evt.amount;
-      const prevPackageEnd = activeDepositsList.length > 0
-        ? activeDepositsList[activeDepositsList.length - 1].packageEndIncome
-        : 0;
-      const packageStartIncome = prevPackageEnd;
-      const packageEndIncome = packageStartIncome + (evt.amount * 2.2);
+      const orig = evt.originalEvent;
+      const packageStartIncome = (orig && orig.packageStartIncome !== undefined)
+        ? Number(orig.packageStartIncome)
+        : cumulativeTotalEarned;
+      const packageEndIncome = (orig && orig.packageEndIncome !== undefined)
+        ? Number(orig.packageEndIncome)
+        : (cumulativeTotalEarned + evt.amount * 2.2);
+
+      const isActiveOnChain = (orig && orig.active !== undefined) ? Boolean(orig.active) : true;
 
       activeDepositsList.push({
         index: activeDepositsList.length,
@@ -635,7 +639,7 @@ export function generateEventsList(
         boosterEarned: 0,
         packageStartIncome: packageStartIncome,
         packageEndIncome: packageEndIncome,
-        active: true,
+        active: isActiveOnChain,
         txHash: evt.txHash
       });
       updateActiveDeposits();

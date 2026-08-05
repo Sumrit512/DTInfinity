@@ -1222,43 +1222,50 @@ export default function Dashboard() {
       const signer = await provider.getSigner();
       const dtContract = new ethers.Contract(dtInfinityAddress, DT_INFINITY_ABI, signer);
 
-      let maxWithdrawableWei = 0n;
+      let onChainClaimable = 0n;
       try {
-        const stats = await dtContract.getDashboardStats(walletAddress);
-        maxWithdrawableWei = stats.dashboardClaimableBalance || 0n;
-        if (maxWithdrawableWei === 0n) {
-          const info = await dtContract.getUserBasicInfo(walletAddress);
-          const pending = await dtContract.getPendingBalances(walletAddress);
-          maxWithdrawableWei = (info.claimableBalance || 0n) +
-                               (pending.pendingDaily || 0n) +
-                               (pending.pendingBooster || 0n) +
-                               (pending.pendingPerf || 0n);
-        }
+        const info = await dtContract.getUserBasicInfo(walletAddress);
+        const pending = await dtContract.getPendingBalances(walletAddress);
+        onChainClaimable = (info.claimableBalance || 0n) +
+                           (pending.pendingDaily || 0n) +
+                           (pending.pendingBooster || 0n) +
+                           (pending.pendingPerf || 0n);
       } catch (err) {
-        console.warn("Could not fetch on-chain dashboard stats, falling back to replay withdrawable", err);
+        console.warn("Could not fetch on-chain basic info for claimable balance", err);
+      }
+
+      if (onChainClaimable <= 0n) {
+        try {
+          const stats = await dtContract.getDashboardStats(walletAddress);
+          onChainClaimable = stats.dashboardClaimableBalance || 0n;
+        } catch (_) {}
       }
 
       const replayAmount = statsToDisplay.rawWithdrawable || 0;
       let withdrawAmountWei = ethers.parseUnits(replayAmount.toFixed(18), 18);
 
-      if (maxWithdrawableWei > 0n) {
-        withdrawAmountWei = maxWithdrawableWei;
+      if (onChainClaimable > 0n) {
+        withdrawAmountWei = onChainClaimable;
       }
 
       if (withdrawAmountWei <= 0n) {
-        alert("No available rewards to claim");
+        alert("Your available rewards have already been fully withdrawn! Please wait for the next 4-minute ROI payout cycle to accumulate new rewards.");
         return;
       }
 
       let tx;
       try {
-        tx = await dtContract.withdraw(withdrawAmountWei, { gasLimit: 1000000n });
-      } catch (withdrawErr) {
-        console.warn("withdraw(amount) failed, attempting fallback claimAll():", withdrawErr);
+        if (typeof dtContract.claimAll === "function") {
+          tx = await dtContract.claimAll();
+        } else {
+          tx = await dtContract.withdraw(withdrawAmountWei);
+        }
+      } catch (primaryErr) {
+        console.warn("Primary claim method failed, attempting fallback withdraw(amount):", primaryErr);
         try {
-          tx = await dtContract.claimAll({ gasLimit: 1000000n });
-        } catch (claimAllErr) {
-          throw withdrawErr;
+          tx = await dtContract.withdraw(withdrawAmountWei);
+        } catch (fallbackErr) {
+          throw primaryErr;
         }
       }
 
@@ -1522,8 +1529,11 @@ export default function Dashboard() {
     // Cumulative withdrawable income accrued from streams (instant perf_instant transfers directly to wallet, not claimable balance)
     const cumulativeWithdrawable = replayDailyROI + replayBoosterROI + replayPerfDaily + replayLevelROI;
 
-    // Requirement 1 & 3: Claimable Balance = Cumulative Withdrawable Income - Total Amount Withdrawn
-    const withdrawableVal = Math.max(0, Math.round((cumulativeWithdrawable - replayWithdrawals) * 1e8) / 1e8);
+    // Requirement 1 & 3: Claimable Balance - use exact on-chain claimable balance from smart contract
+    const onChainClaimableNum = (parseFloat(userData?.claimableBalance || "0")) + displayPendingDaily + displayPendingBooster + displayPendingPerf + displayPendingLevelROI;
+    const withdrawableVal = (userData && userData.claimableBalance !== undefined)
+      ? Math.max(0, Math.round(onChainClaimableNum * 1e8) / 1e8)
+      : Math.max(0, Math.round((cumulativeWithdrawable - replayWithdrawals) * 1e8) / 1e8);
 
     // Requirement 4: Total Earned = Daily ROI + Booster ROI + Level Income + Level ROI + Performance Bonus
     const totalEarnedVal = replayDailyROI + replayBoosterROI + replayLevelIncome + replayLevelROI + replayPerf;
@@ -1544,6 +1554,7 @@ export default function Dashboard() {
       pendingPerformance: "0.00",
       totalROI: dashboardROIVal.toFixed(2),
       totalEarned: totalEarnedVal.toFixed(2),
+      claimableBalance: withdrawableVal.toFixed(2),
       totalAvailable: withdrawableVal.toFixed(2),
       boosterTier: boosterTier,
       // Raw numeric values for withdraw function & validation
@@ -1556,7 +1567,7 @@ export default function Dashboard() {
       rawWithdrawable: withdrawableVal,
       rawTotalEarned: totalEarnedVal
     };
-  }, [simulationResult, userData?.totalWithdrawn]);
+  }, [simulationResult, userData?.claimableBalance, userData?.totalWithdrawn, displayPendingDaily, displayPendingBooster, displayPendingPerf, displayPendingLevelROI]);
 
   const lifetimeTeamVol = useMemo(() => {
     if (!treeNodes || !walletAddress) return parseFloat(userData.totalTeamVolume || "0");
