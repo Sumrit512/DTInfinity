@@ -51,11 +51,18 @@ export default function DashboardView({
   const isUserCapped = userDepNum > 0 && totalEarnedForCapping >= maxNetCap - 0.001;
   const currentMonthVol = parseFloat(userData?.totalTeamVolume || "0");
 
-  const validQualifications = (pendingQualifications || []).filter(qual => {
+  const unexpiredQualifications = (pendingQualifications || []).filter(qual => {
     const endClaimTime = Number(qual.claimTime) + Number(perfOneDay);
     const isExpired = nowUnix >= endClaimTime;
     return !isExpired;
   });
+
+  // Display ONLY the single highest tier bonus that the user is eligible for
+  const highestQualification = unexpiredQualifications.length > 0
+    ? unexpiredQualifications.reduce((max, q) => Number(q.tierIndex) > Number(max.tierIndex) ? q : max, unexpiredQualifications[0])
+    : null;
+
+  const validQualifications = highestQualification ? [highestQualification] : [];
 
   return (
     <div className="view active">
