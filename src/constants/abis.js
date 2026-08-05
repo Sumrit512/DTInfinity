@@ -1,5 +1,5 @@
 // Default contract addresses (placeholders that user can update in settings)
-export const DEFAULT_DT_INFINITY_ADDRESS = "0x704757e295217895a3e7a15a88773489b20dee82";
+export const DEFAULT_DT_INFINITY_ADDRESS = "0x6fd770defced046632d4262786075482363082b9";
 export const DEFAULT_USDT_ADDRESS = "0x5e2893770f10106BAD262939d9275463Ce333f46";
 
 // Simple USDT ABI
@@ -37,6 +37,7 @@ export const DT_INFINITY_ABI = [
   "function pendingTiers(address user, uint256 index) external view returns (bool)",
   "function pendingTierCappedAtStart(address user, uint256 index) external view returns (bool)",
   "function qualificationMonth(address user, uint256 index) external view returns (uint256)",
+  "function tierQualifiedMonth(address user, uint256 index) external view returns (uint256)",
   "function getActiveBonuses(address user) external view returns (tuple(uint256 startTime, uint256 lastClaimTime, uint256 dailyRate, uint256 endTime)[])",
   "function getPerformanceBonusRecords(address user) external view returns (tuple(uint16 recordVersion, uint256 recordId, uint256 tierIndex, uint256 monthId, uint256 qualificationTimestamp, uint256 claimWindowOpenTimestamp, uint256 streamStartTimestamp, uint256 streamEndTimestamp, uint256 activatedTimestamp, uint256 intervalSeconds, uint256 scheduledIntervals, uint256 dailyRate, uint256 instantAmount, uint256 dailyAmount, uint256 totalBonus, uint256 daysPaid, uint256 amountPaid, uint8 status, uint8 activationType, bool completed)[])",
   "function getPendingPerformanceQualifications(address userAddr) external view returns (tuple(uint256 tierIndex, uint256 target, uint256 instant, uint256 daily, bool isPending, uint256 claimTime, bool isClaimWindowActive)[])",
