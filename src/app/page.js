@@ -148,8 +148,8 @@ export default function Dashboard() {
   const [currentPage, setCurrentPage] = useState(1);
 
   // Real-time ticking simulation states
-  const [oneDay, setOneDay] = useState(1800n);
-  const [perfOneDay, setPerfOneDay] = useState(480n);
+  const [oneDay, setOneDay] = useState(240n);
+  const [perfOneDay, setPerfOneDay] = useState(240n);
   const [secondsSinceSync, setSecondsSinceSync] = useState(0);
 
   // Mobile responsiveness sidebar state
@@ -608,8 +608,8 @@ export default function Dashboard() {
       const dtContract = new ethers.Contract(dtInfinityAddress, DT_INFINITY_ABI, provider);
       const usdtContract = new ethers.Contract(usdtAddress, USDT_ABI, provider);
 
-      let currentOneDayVal = 1800n;
-      let currentPerfOneDayVal = 480n;
+      let currentOneDayVal = 240n;
+      let currentPerfOneDayVal = 240n;
       try {
         const [cUSDT, wUSDT, cOneDay, cPerfOneDay] = await Promise.all([
           usdtContract.balanceOf(dtInfinityAddress),

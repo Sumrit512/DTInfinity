@@ -383,7 +383,7 @@ export function generateEventsList(
       else if (refs10 >= 4) calculatedRate = 150;
       else if (refs5 >= 2) calculatedRate = 100;
 
-      return calculatedRate;
+      return Math.max(calculatedRate, passedBps);
     }
 
     return passedBps > 50 ? passedBps : 50;
