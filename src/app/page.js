@@ -512,7 +512,8 @@ export default function Dashboard() {
         roiBoosterEarned: formatUSDT(incomeInfo.roiBoosterEarned),
         levelIncomeEarned: formatUSDT(incomeInfo.levelIncomeEarned),
         levelROIEarned: formatUSDT(incomeInfo.levelROIEarned),
-        performanceBonusEarned: formatUSDT(incomeInfo.performanceBonusEarned)
+        performanceBonusEarned: formatUSDT(incomeInfo.performanceBonusEarned),
+        loadedFromChain: true
       };
 
       try {
@@ -743,7 +744,8 @@ export default function Dashboard() {
             roiBoosterEarned: formatUSDT(incomeInfo.roiBoosterEarned),
             levelIncomeEarned: formatUSDT(incomeInfo.levelIncomeEarned),
             levelROIEarned: formatUSDT(incomeInfo.levelROIEarned),
-            performanceBonusEarned: formatUSDT(incomeInfo.performanceBonusEarned)
+            performanceBonusEarned: formatUSDT(incomeInfo.performanceBonusEarned),
+            loadedFromChain: true
           }
         }));
         if (!selectedNode) {

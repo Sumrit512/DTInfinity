@@ -7,13 +7,19 @@ import { shorten } from "../../utils/formatters.js";
 function TreeNodeComponent({ addr, depth = 0, treeNodes, selectedNode, setSelectedNode, loadTreeNode, setLoading }) {
   const normalizedAddr = addr.toLowerCase();
   const node = treeNodes[normalizedAddr];
-  const isExpanded = !!node;
   const isSelected = selectedNode?.toLowerCase() === normalizedAddr;
+
+  // Local expansion state for this node in the interactive tree UI
+  const [isExpanded, setIsExpanded] = React.useState(depth === 0);
 
   const handleNodeClick = async (e) => {
     e.stopPropagation();
     setSelectedNode(addr);
-    if (!isExpanded && loadTreeNode) {
+
+    const nextExpanded = !isExpanded;
+    setIsExpanded(nextExpanded);
+
+    if (nextExpanded && loadTreeNode && (!node || !node.loadedFromChain)) {
       setLoading(true);
       await loadTreeNode(addr);
       setLoading(false);
@@ -33,14 +39,15 @@ function TreeNodeComponent({ addr, depth = 0, treeNodes, selectedNode, setSelect
           <div className="tree-node-addr mono">{shorten(addr)}</div>
           {node && (
             <div className="tree-node-meta">
-              <span>Pkg: {parseFloat(node.totalDeposits).toFixed(0)}</span> · <span>Vol: {parseFloat(node.totalTeamVolume).toFixed(0)}</span>
+              <span>Pkg: {parseFloat(node.totalDeposits || "0").toFixed(0)}</span> · <span>Vol: {parseFloat(node.totalTeamVolume || "0").toFixed(0)}</span>
+              {!node.loadedFromChain && <span style={{ marginLeft: "5px", color: "var(--blue-bright)" }}>· Click to sync</span>}
             </div>
           )}
           {!node && <div className="tree-node-meta click-to-expand">Click to expand</div>}
         </div>
       </div>
 
-      {isExpanded && node.children && node.children.length > 0 && (
+      {isExpanded && node && node.children && node.children.length > 0 && (
         <div className="tree-children-container">
           {node.children.map((childAddr, idx) => (
             <TreeNodeComponent
