@@ -31,6 +31,7 @@ export const upsertUser = mutation({
       lastClaimTime: v.number(),
       isDefaultedExpired: v.optional(v.boolean()),
     }))),
+    directs: v.optional(v.array(v.string())),
   },
   handler: async (ctx, args) => {
     const contractLower = args.contractAddress.toLowerCase();
@@ -75,7 +76,7 @@ export const upsertUser = mutation({
       await ctx.db.insert("users", userData);
     }
     
-    // Record referrals under this contractAddress scope
+    // Record referrals under this contractAddress scope from user's sponsor perspective
     if (sponsorLower !== "0x0000000000000000000000000000000000000000") {
       const existingRef = await ctx.db
         .query("referrals")
@@ -89,6 +90,26 @@ export const upsertUser = mutation({
           sponsor: sponsorLower,
           referral: addressLower,
         });
+      }
+    }
+
+    // Record referrals under this contractAddress scope from user's direct referrals perspective
+    if (args.directs) {
+      for (const d of args.directs) {
+        const dLower = d.toLowerCase();
+        const existingRef = await ctx.db
+          .query("referrals")
+          .withIndex("by_contract_address_referral", (q) =>
+            q.eq("contractAddress", contractLower).eq("referral", dLower)
+          )
+          .unique();
+        if (!existingRef) {
+          await ctx.db.insert("referrals", {
+            contractAddress: contractLower,
+            sponsor: addressLower,
+            referral: dLower,
+          });
+        }
       }
     }
   },

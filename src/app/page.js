@@ -190,7 +190,29 @@ export default function Dashboard() {
   } : "skip");
 
   const treeNodes = useMemo(() => {
-    return { ...localTreeNodes, ...dbTreeNodes };
+    const merged = { ...localTreeNodes };
+    if (dbTreeNodes) {
+      Object.keys(dbTreeNodes).forEach(addr => {
+        const dbNode = dbTreeNodes[addr];
+        const lowerAddr = addr.toLowerCase();
+        if (merged[lowerAddr]) {
+          const localChildren = merged[lowerAddr].children || [];
+          const dbChildren = dbNode.children || [];
+          const combined = Array.from(new Set([
+            ...localChildren.map(c => c.toLowerCase()),
+            ...dbChildren.map(c => c.toLowerCase())
+          ]));
+          merged[lowerAddr] = {
+            ...merged[lowerAddr],
+            ...dbNode,
+            children: combined
+          };
+        } else {
+          merged[lowerAddr] = dbNode;
+        }
+      });
+    }
+    return merged;
   }, [localTreeNodes, dbTreeNodes]);
 
   async function syncToConvex(
@@ -235,6 +257,7 @@ export default function Dashboard() {
           endTime: Number(b.endTime || 0),
           lastClaimTime: Number(b.lastClaimTime || b.startTime || 0)
         })),
+        directs: directs
       });
 
       if (deposits && deposits.length > 0) {
@@ -509,6 +532,7 @@ export default function Dashboard() {
           strongestLegAddress: networkInfo.strongestLegAddress,
           strongestLegVolume: parseFloat(ethers.formatUnits(networkInfo.strongestLegVolume || 0n, 18)),
           boosterRate: Number(boosterRate || 0n) / 100,
+          directs: directs
         });
       } catch (err) {
         console.warn("Failed to sync node to Convex in loadTreeNode:", addr, err);
