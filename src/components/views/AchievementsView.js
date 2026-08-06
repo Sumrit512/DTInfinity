@@ -87,12 +87,13 @@ export default function AchievementsView({
 
   const completedTiersCount = tierAchievements.filter(t => t.isAchieved).length;
 
-  // Build granular historical audit table from simulation ledger & activeBonuses
+  // Build granular historical audit table showing ONLY actual active and past performance bonus payouts
   const historicalRecords = useMemo(() => {
     const list = [];
     const processedKeys = new Set();
 
     (activeBonuses || []).forEach((b, idx) => {
+      const recId = b.recordId ? Number(b.recordId) : (idx + 1);
       const uniqueKey = b.recordId ? `rec_${b.recordId}` : `tier_${b.tierIndex}_${b.startTime}`;
       if (processedKeys.has(uniqueKey)) return;
       processedKeys.add(uniqueKey);
@@ -102,7 +103,7 @@ export default function AchievementsView({
       const tierDef = PERFORMANCE_TIERS[tierIdx] || { name: `Tier ${tierIdx + 1}`, target: 5000, instant: 75, daily: 5 };
       const isInstant = (b.activationType === 1 || b.status === 1 || b.chooseInstant === true);
       const startT = Number(b.startTime || b.monthId || b.qualificationTimestamp || 0);
-      const endT = Number(b.endTime || (startT + 30 * 480));
+      const endT = Number(b.endTime || (startT + 30 * 240));
       
       let amountPaid = 0;
       if (isInstant) {
@@ -111,7 +112,7 @@ export default function AchievementsView({
         amountPaid = b.amountPaid !== undefined && b.amountPaid > 0 ? b.amountPaid : 30 * (b.dailyRate || tierDef.daily);
       }
 
-      const displayId = b.recordId ? `#${b.recordId}` : `Auto-${tierIdx + 1}`;
+      const displayId = `#${recId}`;
 
       list.push({
         recordId: displayId,
@@ -127,32 +128,8 @@ export default function AchievementsView({
       });
     });
 
-    (pendingQualifications || []).forEach((qual) => {
-      const tierIdx = Number(qual.tierIndex || 0);
-      const startT = Number(qual.claimTime || qual.qualificationTimestamp || Math.floor(Date.now() / 1000));
-      const uniqueKey = `qual_tier_${tierIdx}_${startT}`;
-
-      const existsInList = list.some(x => x.tierIndex === tierIdx && Math.abs(x.startTime - startT) < 300);
-      if (!existsInList && !processedKeys.has(uniqueKey)) {
-        processedKeys.add(uniqueKey);
-        const tierDef = PERFORMANCE_TIERS[tierIdx] || { name: `Tier ${tierIdx + 1}`, target: 5000, instant: 75, daily: 5 };
-        list.push({
-          recordId: `Auto-${tierIdx + 1}`,
-          tierName: tierDef.name || `Tier ${tierIdx + 1}`,
-          tierIndex: tierIdx,
-          targetVolume: tierDef.target,
-          optionChosen: "Option B (30-Day Stream)",
-          dailyRate: qual.daily || tierDef.daily,
-          amountPaid: 30 * (qual.daily || tierDef.daily),
-          startTime: startT,
-          endTime: startT + 30 * 480,
-          status: "Active Payout"
-        });
-      }
-    });
-
     return list.sort((a, b) => b.startTime - a.startTime);
-  }, [activeBonuses, pendingQualifications]);
+  }, [activeBonuses]);
 
   return (
     <div className="view active" style={{ display: "flex", flexDirection: "column", gap: "24px" }}>

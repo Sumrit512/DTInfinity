@@ -249,7 +249,7 @@ export const syncMissedTx = action({
         "function getUserIncomeInfo(address user) external view returns (uint256 dailyROIEarned, uint256 roiBoosterEarned, uint256 levelIncomeEarned, uint256 levelROIEarned, uint256 performanceBonusEarned)",
         "function getUserNetworkInfo(address user) external view returns (uint256 directCount, uint256 qualifiedDirectsCount, uint256 totalTeamCount, uint256 totalTeamVolume, address strongestLegAddress, uint256 strongestLegVolume)",
         "function getBoosterRate(address userAddr) external view returns (uint256)",
-        "function getUserDeposits(address userAddr) external view returns (tuple(uint256 amount, uint256 time, uint256 lastUpdateROI, uint256 dailyROIEarned, uint256 roiBoosterEarned, uint256 rateBps, bool isFirstDeposit)[])",
+        "function getUserDeposits(address userAddr) external view returns (tuple(uint256 amount, uint256 time, uint256 lastUpdateROI, uint256 dailyROIEarned, uint256 roiBoosterEarned, uint256 packageStartIncome, uint256 packageEndIncome, bool hasBooster, uint256 boosterRate, bool active)[])",
         "function getUserWithdrawals(address userAddr) external view returns (tuple(uint256 amount, uint256 time)[])"
       ], provider);
 

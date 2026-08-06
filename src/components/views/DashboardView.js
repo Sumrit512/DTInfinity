@@ -54,19 +54,19 @@ export default function DashboardView({
   const unexpiredQualifications = (pendingQualifications || []).filter(qual => {
     const endClaimTime = Number(qual.claimTime) + Number(perfOneDay);
     const isExpired = nowUnix >= endClaimTime;
-    return !isExpired;
+    return !isExpired && !qual.isCappedAtStart;
   });
 
-  // Display ONLY the single highest tier bonus that the user is eligible for
+  // Display ONLY the single highest tier bonus that the user is eligible for when NOT capped
   const highestQualification = unexpiredQualifications.length > 0
     ? unexpiredQualifications.reduce((max, q) => Number(q.tierIndex) > Number(max.tierIndex) ? q : max, unexpiredQualifications[0])
     : null;
 
-  const validQualifications = highestQualification ? [highestQualification] : [];
+  const validQualifications = (!isUserCapped && highestQualification) ? [highestQualification] : [];
 
   return (
     <div className="view active">
-      {validQualifications.length > 0 && (
+      {!isUserCapped && validQualifications.length > 0 && (
         <div className="card" style={{
           background: "rgba(94, 200, 242, 0.06)",
           border: "2px dashed var(--blue-bright)",

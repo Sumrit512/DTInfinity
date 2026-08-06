@@ -803,9 +803,16 @@ export default function Dashboard() {
         }
 
         let rawPerformanceRecords = [];
+        const cappedTiers = [];
         try {
           if (typeof dtContract.getPerformanceBonusRecords === "function") {
             rawPerformanceRecords = await dtContract.getPerformanceBonusRecords(addr);
+          }
+          for (let t = 0; t < 6; t++) {
+            try {
+              const isCapped = await dtContract.pendingTierCappedAtStart(addr, t);
+              if (isCapped) cappedTiers.push(t);
+            } catch (_) {}
           }
         } catch (e) {
           console.warn("Could not read performance bonus records", e);
@@ -843,7 +850,8 @@ export default function Dashboard() {
                 startTime: cleanStartT > 0 ? cleanStartT : Math.floor(Date.now() / 1000),
                 endTime: endT > 0 ? endT : (cleanStartT + scheduledInts * intervalSecs),
                 lastClaimTime: cleanStartT,
-                fromRecords: true
+                fromRecords: true,
+                isCappedAtStart: cappedTiers.includes(tIdx)
               };
             });
           if (bonusesMapped.length > 0) {
@@ -1408,29 +1416,8 @@ export default function Dashboard() {
       }
     });
 
-    const nowUnix = Math.floor(Date.now() / 1000);
-    (pendingQualifications || []).forEach(qual => {
-      const claimTimeNum = Number(qual.claimTime || qual.qualificationTimestamp || 0);
-      const endClaimTime = claimTimeNum > 0 ? claimTimeNum + Number(perfOneDay) : 0;
-      const isExpired = claimTimeNum === 0 || nowUnix >= endClaimTime || !qual.isClaimWindowActive || qual.isPending;
-      if (isExpired && !qual.isCappedAtStart && userDepNum >= 50) {
-        const tier = Number(qual.tierIndex);
-        const startT = claimTimeNum > 0 ? claimTimeNum : nowUnix;
-        const isDup = list.some(existing => existing.tierIndex === tier && Math.abs(existing.startTime - startT) < 300);
-        if (!isDup) {
-          list.push({
-            tierIndex: tier,
-            dailyRate: PERFORMANCE_TIERS[tier]?.daily || 5,
-            startTime: startT,
-            endTime: startT + 30 * Number(perfOneDay),
-            lastClaimTime: startT
-          });
-        }
-      }
-    });
-
     return list;
-  }, [activeBonuses, pendingQualifications, perfOneDay, userData.totalDeposits, userData.registrationTime]);
+  }, [activeBonuses]);
 
   const simulationResult = useMemo(() => {
     const ledger = dbLedger || [];

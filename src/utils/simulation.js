@@ -191,6 +191,10 @@ export function generateEventsList(
     const startT = Number(b.startTime || b.monthId || b.qualificationTimestamp || 0);
     const tierIdx = b.tierIndex !== undefined ? Number(b.tierIndex) : 0;
 
+    if (b.isCappedAtStart && Number(b.status || 0) === 0) {
+      return; // Skip generating simulated daily salary for forfeited records
+    }
+
     if (recId > 0) {
       if (processedPerformanceBonusRecords.has(recId)) {
         return; // Process each unique Record ID exactly once
@@ -383,7 +387,13 @@ export function generateEventsList(
       else if (refs10 >= 4) calculatedRate = 150;
       else if (refs5 >= 2) calculatedRate = 100;
 
-      return Math.max(calculatedRate, passedBps);
+      // Apply passedBps only for current timestamp / live view, avoiding retroactive application to historical ticks
+      const nowTs = Math.floor(Date.now() / 1000);
+      if (timestamp >= nowTs - 60) {
+        return Math.max(calculatedRate, passedBps);
+      }
+
+      return calculatedRate;
     }
 
     return passedBps > 50 ? passedBps : 50;
