@@ -1,5 +1,5 @@
 // Default contract addresses (placeholders that user can update in settings)
-export const DEFAULT_DT_INFINITY_ADDRESS = "0x0DDDd5965406213E663Fb2EE17DF179e7Bc720e0";
+export const DEFAULT_DT_INFINITY_ADDRESS = "0xe5edcc190d4dfeaf2cb015612904a1958e983835";
 export const DEFAULT_USDT_ADDRESS = "0x5e2893770f10106BAD262939d9275463Ce333f46";
 
 // Simple USDT ABI
@@ -30,6 +30,7 @@ export const DT_INFINITY_ABI = [
   "function getUserIncomeInfo(address user) external view returns (uint256 dailyROIEarned, uint256 roiBoosterEarned, uint256 levelIncomeEarned, uint256 levelROIEarned, uint256 performanceBonusEarned)",
   "function getUserNetworkInfo(address user) external view returns (uint256 directCount, uint256 qualifiedDirectsCount, uint256 totalTeamCount, uint256 totalTeamVolume, address strongestLegAddress, uint256 strongestLegVolume)",
   "function getPendingBalances(address userAddr) external view returns (uint256 pendingDaily, uint256 pendingBooster, uint256 pendingPerf)",
+  "function updateRewards(address userAddr) external",
   "function getUserDeposits(address userAddr) external view returns (tuple(uint256 amount, uint256 time, uint256 lastUpdateROI, uint256 dailyROIEarned, uint256 roiBoosterEarned, uint256 rateBps, bool isFirstDeposit)[])",
   "function getUserWithdrawals(address userAddr) external view returns (tuple(uint256 amount, uint256 time)[])",
   "function userLegVolume(address sponsor, address directReferral) external view returns (uint256)",

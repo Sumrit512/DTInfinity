@@ -20,12 +20,14 @@ export default function DashboardView({
   copyReferralLink,
   handleClaimPerformance,
   handleClaimAll,
+  onClaimROI,
   loading,
   setActiveView,
   perfOneDay,
   lifetimeTeamVol
 }) {
   const [nowUnix, setNowUnix] = React.useState(Math.floor(Date.now() / 1000));
+  const [locallyClaimedTiers, setLocallyClaimedTiers] = React.useState(new Set());
 
   React.useEffect(() => {
     const interval = setInterval(() => {
@@ -54,7 +56,7 @@ export default function DashboardView({
   const unexpiredQualifications = (pendingQualifications || []).filter(qual => {
     const endClaimTime = Number(qual.claimTime) + Number(perfOneDay);
     const isExpired = nowUnix >= endClaimTime;
-    return !isExpired && !qual.isCappedAtStart;
+    return !isExpired && !qual.isCappedAtStart && qual.isPending && !locallyClaimedTiers.has(qual.tierIndex);
   });
 
   // Display ONLY the single highest tier bonus that the user is eligible for when NOT capped
@@ -63,6 +65,15 @@ export default function DashboardView({
     : null;
 
   const validQualifications = (!isUserCapped && highestQualification) ? [highestQualification] : [];
+
+  const handleButtonClick = (tierIdx, chooseInstant) => {
+    setLocallyClaimedTiers(prev => {
+      const next = new Set(prev);
+      next.add(tierIdx);
+      return next;
+    });
+    handleClaimPerformance(tierIdx, chooseInstant);
+  };
 
   return (
     <div className="view active">
@@ -154,7 +165,7 @@ export default function DashboardView({
                       ) : (
                         <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
                           <button
-                            onClick={() => handleClaimPerformance(qual.tierIndex, true)}
+                            onClick={() => handleButtonClick(qual.tierIndex, true)}
                             className="btn primary-btn"
                             disabled={loading}
                             style={{
@@ -169,7 +180,7 @@ export default function DashboardView({
                             Option 1: Instant Payout ({qual.instant} USDT)
                           </button>
                           <button
-                            onClick={() => handleClaimPerformance(qual.tierIndex, false)}
+                            onClick={() => handleButtonClick(qual.tierIndex, false)}
                             className="btn secondary-btn"
                             disabled={loading}
                             style={{
@@ -260,10 +271,31 @@ export default function DashboardView({
       <div style={{ marginTop: "24px", marginBottom: "24px" }}>
         <h3 className="section-title">Income details</h3>
         <div className="income-grid">
-          <div className="income-card">
-            <div className="icon">📈</div>
-            <div className="name">Daily & Booster ROI</div>
-            <div className="amt" style={{ color: "var(--blue-bright)" }}>{statsToDisplay.totalROI} <span style={{ fontSize: "13px", color: "var(--text-muted)" }}>USDT</span></div>
+          <div className="income-card" style={{ display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
+            <div>
+              <div className="icon">📈</div>
+              <div className="name">Daily & Booster ROI</div>
+              <div className="amt" style={{ color: "var(--blue-bright)" }}>{statsToDisplay.totalROI} <span style={{ fontSize: "13px", color: "var(--text-muted)" }}>USDT</span></div>
+            </div>
+            <div style={{ marginTop: "12px" }}>
+              <button
+                onClick={onClaimROI}
+                disabled={loading}
+                className="preset-btn"
+                style={{
+                  width: "100%",
+                  padding: "6px",
+                  fontSize: "11px",
+                  background: "rgba(0, 168, 255, 0.15)",
+                  border: "1px solid var(--blue-bright)",
+                  color: "var(--blue-bright)",
+                  cursor: "pointer",
+                  borderRadius: "4px"
+                }}
+              >
+                {loading ? "Processing..." : "Claim ROI"}
+              </button>
+            </div>
           </div>
 
           <div className="income-card">

@@ -115,7 +115,10 @@ export function generateEventsList(
   treeNodes,
   activeBonuses,
   userDeposits = [],
-  onChainEvents = []
+  onChainEvents = [],
+  lastUpdateROIVal = 0,
+  settledDailyROIVal = 0,
+  settledBoosterROIVal = 0
 ) {
   const regTime = Number(registrationTime || 0);
   if (regTime === 0) {
@@ -207,23 +210,35 @@ export function generateEventsList(
       if (exists) return;
     }
 
-    const isInstant = (b.status === 1 || b.activationType === 1 || b.chooseInstant === true);
+    const isInstant = (
+      b.status === 1 ||
+      b.activationType === 1 ||
+      b.activationType === 4 ||
+      b.chooseInstant === true ||
+      (Number(b.status || 0) === 0 && now >= startT + PERF_ONE_DAY_SECS)
+    );
 
     if (isInstant) {
-      // Option A: Generate EXACTLY ONE ledger entry at the record's start timestamp.
+      // Option A: Generate EXACTLY ONE ledger entry at the record's start/activation timestamp.
       const instantAmt = b.instantAmount || PERFORMANCE_TIERS[tierIdx]?.instant || 75;
+      const isAuto = b.activationType === 4 || (Number(b.status || 0) === 0 && now >= startT + PERF_ONE_DAY_SECS);
+      const eventTimestamp = isAuto
+        ? (Number(b.activatedTimestamp || startT + PERF_ONE_DAY_SECS))
+        : (Number(b.activatedTimestamp || startT));
+
       rawRealEvents.push({
         type: "perf_instant",
-        typeName: "Performance Bonus (Instant)",
+        typeName: isAuto ? "Performance Bonus (Auto-Instant)" : "Performance Bonus (Instant)",
         fromUser: "Contract",
         amount: instantAmt,
         tierIndex: tierIdx,
         level: "-",
-        timestamp: startT,
+        timestamp: eventTimestamp,
         status: "Completed",
         txHash: `0x_record_instant_${recId || tierIdx}_${startT}`,
         blockNumber: 0,
-        recordId: recId
+        recordId: recId,
+        isSimulated: true
       });
     } else {
       // Option B: Generate 30-day salary stream beginning at the record's start timestamp.
@@ -662,12 +677,14 @@ export function generateEventsList(
       ledger.push(evt);
     }
     else {
-      // level_income, level_roi, perf_instant
+      // level_income, level_roi, perf_instant, roi, booster_roi
       const amt = evt.amount;
       if (amt > 0) {
         cumulativeTotalEarned += amt;
         if (evt.type === 'level_income') accumulatedLevelIncome += amt;
         else if (evt.type === 'level_roi') accumulatedLevelROI += amt;
+        else if (evt.type === 'roi') accumulatedDailyROI += amt;
+        else if (evt.type === 'booster_roi') accumulatedBoosterROI += amt;
         else accumulatedPerf += amt;
 
         updateActiveDeposits();
@@ -697,16 +714,73 @@ export function generateEventsList(
   console.log("Stream Count:", (activeBonuses || []).length);
 
   let previousTime = regTime;
+  let adjustmentApplied = false;
+
+  function runSimulationSlice(start, end, isSimulated) {
+    if (end > start) {
+      if (!adjustmentApplied && lastUpdateROIVal > 0 && start < lastUpdateROIVal && end >= lastUpdateROIVal) {
+        simulateElapsedTime(start, lastUpdateROIVal, isSimulated);
+        
+        const diffDaily = settledDailyROIVal - accumulatedDailyROI;
+        const diffBooster = settledBoosterROIVal - accumulatedBoosterROI;
+        
+        if (Math.abs(diffDaily) > 0.0001) {
+          const amt = Math.round(diffDaily * 1e8) / 1e8;
+          accumulatedDailyROI += amt;
+          cumulativeTotalEarned += amt;
+          ledger.push({
+            type: "roi",
+            typeName: "Daily ROI Adjustment",
+            fromUser: "Contract",
+            amount: amt,
+            level: "-",
+            timestamp: lastUpdateROIVal,
+            status: "Completed",
+            txHash: `0x_roi_adj_${lastUpdateROIVal}`,
+            blockNumber: 0,
+            isSimulated: false
+          });
+        }
+        if (Math.abs(diffBooster) > 0.0001) {
+          const amt = Math.round(diffBooster * 1e8) / 1e8;
+          accumulatedBoosterROI += amt;
+          cumulativeTotalEarned += amt;
+          ledger.push({
+            type: "booster_roi",
+            typeName: "Booster ROI Adjustment",
+            fromUser: "Contract",
+            amount: amt,
+            level: "-",
+            timestamp: lastUpdateROIVal,
+            status: "Completed",
+            txHash: `0x_booster_adj_${lastUpdateROIVal}`,
+            blockNumber: 0,
+            isSimulated: false
+          });
+        }
+        
+        adjustmentApplied = true;
+        simulateElapsedTime(lastUpdateROIVal, end, isSimulated);
+      } else {
+        simulateElapsedTime(start, end, isSimulated);
+      }
+    }
+  }
+
   for (const event of uniqueRealEvents) {
     if (event.timestamp > previousTime) {
-      simulateElapsedTime(previousTime, event.timestamp, false);
+      runSimulationSlice(previousTime, event.timestamp, false);
     }
     replaySolidityTransaction(event);
     previousTime = Math.max(previousTime, event.timestamp);
   }
 
-  // Simulate Post-Historical Pending ROI up to NOW
-  simulateElapsedTime(previousTime, now, true);
+  if (!adjustmentApplied && lastUpdateROIVal > 0) {
+    runSimulationSlice(previousTime, lastUpdateROIVal, true);
+    previousTime = lastUpdateROIVal;
+  }
+
+  runSimulationSlice(previousTime, now, true);
 
   // --------------------------------------------------------------------------
   // STORAGE-BACKED PERFORMANCE BONUS UNIFIED RECORD INGESTION & FALLBACK

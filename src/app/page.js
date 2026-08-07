@@ -946,7 +946,11 @@ export default function Dashboard() {
           Number(currentPerfOneDayVal),
           treeNodes,
           bonusesMapped,
-          deposits
+          deposits,
+          null, // onChainEvents placeholder
+          Number(basicInfo.lastUpdateROI || 0n),
+          parseFloat(ethers.formatUnits(incomeInfo.dailyROIEarned || 0n, 18)),
+          parseFloat(ethers.formatUnits(incomeInfo.roiBoosterEarned || 0n, 18))
         );
 
         setOnChainEvents(simResult?.ledger || []);
@@ -1244,6 +1248,32 @@ export default function Dashboard() {
     }
   }
 
+  async function handleClaimROI() {
+    if (!walletConnected) {
+      alert("Please connect wallet first");
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const provider = new ethers.BrowserProvider(window.ethereum);
+      const signer = await provider.getSigner();
+      const dtContract = new ethers.Contract(dtInfinityAddress, DT_INFINITY_ABI, signer);
+
+      const tx = await dtContract.updateRewards(walletAddress);
+      const receipt = await tx.wait();
+
+      alert("ROI settled successfully!");
+      await loadBlockchainData(walletAddress);
+    } catch (err) {
+      console.error("Claim ROI transaction error:", err);
+      const errMsg = err?.reason || err?.data?.message || err?.message || "Claim ROI transaction failed or was rejected.";
+      alert(`Claim ROI failed: ${errMsg}`);
+    } finally {
+      setLoading(false);
+    }
+  }
+
   async function handleClaimAll() {
     if (!walletConnected) {
       alert("Please connect wallet first");
@@ -1475,7 +1505,10 @@ export default function Dashboard() {
       treeNodes,
       effectiveActiveBonuses,
       realDeposits,
-      ledger
+      ledger,
+      Number(userData.lastUpdateROI || 0),
+      parseFloat(userData.dailyROIEarned || "0"),
+      parseFloat(userData.roiBoosterEarned || "0")
     );
   }, [dbLedger, targetAddressForLedger, walletAddress, userData, oneDay, perfOneDay, treeNodes, effectiveActiveBonuses]);
 
@@ -1813,6 +1846,7 @@ export default function Dashboard() {
             copyReferralLink={copyReferralLink}
             handleClaimPerformance={handleClaimPerformance}
             handleClaimAll={handleClaimAll}
+            onClaimROI={handleClaimROI}
             loading={loading}
             setActiveView={setActiveView}
             perfOneDay={perfOneDay}
