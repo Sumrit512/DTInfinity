@@ -724,7 +724,54 @@ export function generateEventsList(
         const diffDaily = settledDailyROIVal - accumulatedDailyROI;
         const diffBooster = settledBoosterROIVal - accumulatedBoosterROI;
         
-        if (Math.abs(diffDaily) > 0.0001) {
+        let expectedDailyRate = 0;
+        let expectedBoosterRate = 0;
+        for (let i = 0; i < activeDepositsList.length; i++) {
+          const dep = activeDepositsList[i];
+          if (dep.active && dep.timestamp <= lastUpdateROIVal) {
+            expectedDailyRate += (dep.amount * 50) / 10000;
+            if (i === 0) {
+              const boosterRateAtTick = Math.max(50, getBoosterRateAtTime(lastUpdateROIVal));
+              if (boosterRateAtTick > 50) {
+                expectedBoosterRate += (dep.amount * (boosterRateAtTick - 50)) / 10000;
+              }
+            }
+          }
+        }
+        if (expectedDailyRate === 0) {
+          expectedDailyRate = (currentDeposit > 0 ? (currentDeposit * 50) / 10000 : 0.05);
+        }
+        if (expectedBoosterRate === 0) {
+          expectedBoosterRate = expectedDailyRate;
+        }
+
+        if (diffDaily > 0.0001) {
+          const amt = Math.round(diffDaily * 1e8) / 1e8;
+          accumulatedDailyROI += amt;
+          cumulativeTotalEarned += amt;
+          
+          let remainingAmt = amt;
+          let tickTime = lastUpdateROIVal;
+          let index = 0;
+          while (remainingAmt > 0.0001) {
+            const chunk = Math.min(remainingAmt, expectedDailyRate);
+            ledger.push({
+              type: "roi",
+              typeName: "Daily ROI Payout",
+              fromUser: "Contract",
+              amount: Math.round(chunk * 1e8) / 1e8,
+              level: "-",
+              timestamp: tickTime,
+              status: "Completed",
+              txHash: `0x_roi_adj_${lastUpdateROIVal}_${index}`,
+              blockNumber: 0,
+              isSimulated: false
+            });
+            remainingAmt -= chunk;
+            tickTime -= ONE_DAY_SECS;
+            index++;
+          }
+        } else if (diffDaily < -0.0001) {
           const amt = Math.round(diffDaily * 1e8) / 1e8;
           accumulatedDailyROI += amt;
           cumulativeTotalEarned += amt;
@@ -736,12 +783,39 @@ export function generateEventsList(
             level: "-",
             timestamp: lastUpdateROIVal,
             status: "Completed",
-            txHash: `0x_roi_adj_${lastUpdateROIVal}`,
+            txHash: `0x_roi_adj_neg_${lastUpdateROIVal}`,
             blockNumber: 0,
             isSimulated: false
           });
         }
-        if (Math.abs(diffBooster) > 0.0001) {
+
+        if (diffBooster > 0.0001) {
+          const amt = Math.round(diffBooster * 1e8) / 1e8;
+          accumulatedBoosterROI += amt;
+          cumulativeTotalEarned += amt;
+          
+          let remainingAmt = amt;
+          let tickTime = lastUpdateROIVal;
+          let index = 0;
+          while (remainingAmt > 0.0001) {
+            const chunk = Math.min(remainingAmt, expectedBoosterRate);
+            ledger.push({
+              type: "booster_roi",
+              typeName: "Booster ROI Yield",
+              fromUser: "Contract",
+              amount: Math.round(chunk * 1e8) / 1e8,
+              level: "-",
+              timestamp: tickTime,
+              status: "Completed",
+              txHash: `0x_booster_adj_${lastUpdateROIVal}_${index}`,
+              blockNumber: 0,
+              isSimulated: false
+            });
+            remainingAmt -= chunk;
+            tickTime -= ONE_DAY_SECS;
+            index++;
+          }
+        } else if (diffBooster < -0.0001) {
           const amt = Math.round(diffBooster * 1e8) / 1e8;
           accumulatedBoosterROI += amt;
           cumulativeTotalEarned += amt;
@@ -753,7 +827,7 @@ export function generateEventsList(
             level: "-",
             timestamp: lastUpdateROIVal,
             status: "Completed",
-            txHash: `0x_booster_adj_${lastUpdateROIVal}`,
+            txHash: `0x_booster_adj_neg_${lastUpdateROIVal}`,
             blockNumber: 0,
             isSimulated: false
           });
