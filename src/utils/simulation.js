@@ -271,7 +271,8 @@ export function generateEventsList(
             txHash: `0x_salary_${streamId}_${day}`,
             blockNumber: 0,
             recordId: recId,
-            streamId: streamId
+            streamId: streamId,
+            isSimulated: true
           });
         }
       } else {
@@ -541,6 +542,10 @@ export function generateEventsList(
   function processPerformance(timestamp, bonus, isSimulated = false) {
     if (bonus.accumulatedDays >= 30) return;
     if (bonus.accumulatedAmount >= 30 * bonus.dailyRate - 0.0001) return;
+    if (timestamp > bonus.endTime) {
+      bonus.accumulatedDays = 30; // Force stop simulating this bonus stream
+      return;
+    }
 
     const maxNetworkCap = currentDeposit * 4.0;
     if (cumulativeTotalEarned >= maxNetworkCap - 0.0001) return;
@@ -680,14 +685,14 @@ export function generateEventsList(
       // level_income, level_roi, perf_instant, roi, booster_roi
       let amt = evt.amount;
 
-      // Ensure simulated instant performance bonuses strictly obey the 400% cap
-      if (evt.isSimulated && evt.type === 'perf_instant') {
+      // Ensure all simulated events strictly obey the 400% cap
+      if (evt.isSimulated) {
           const maxNetCap = currentDeposit * 4.0;
           const remNetCap = Math.max(0, maxNetCap - cumulativeTotalEarned);
           amt = Math.min(amt, remNetCap);
           
           if (amt <= 0) {
-              return; // Bonus was completely forfeited due to network capping
+              return; // Event was completely forfeited due to network capping
           }
           evt.amount = Math.round(amt * 1e8) / 1e8;
       }
