@@ -1,5 +1,5 @@
 // Default contract addresses (placeholders that user can update in settings)
-export const DEFAULT_DT_INFINITY_ADDRESS = "0xf8c9b2e0ab0b1e441704d119b2b1d4059482c9e8";
+export const DEFAULT_DT_INFINITY_ADDRESS = "0x0d6edc7626a2274f78d2df087f5ee37a8ae0729b";
 export const DEFAULT_USDT_ADDRESS = "0x5e2893770f10106BAD262939d9275463Ce333f46";
 
 // Simple USDT ABI
