@@ -678,7 +678,20 @@ export function generateEventsList(
     }
     else {
       // level_income, level_roi, perf_instant, roi, booster_roi
-      const amt = evt.amount;
+      let amt = evt.amount;
+
+      // Ensure simulated instant performance bonuses strictly obey the 400% cap
+      if (evt.isSimulated && evt.type === 'perf_instant') {
+          const maxNetCap = currentDeposit * 4.0;
+          const remNetCap = Math.max(0, maxNetCap - cumulativeTotalEarned);
+          amt = Math.min(amt, remNetCap);
+          
+          if (amt <= 0) {
+              return; // Bonus was completely forfeited due to network capping
+          }
+          evt.amount = Math.round(amt * 1e8) / 1e8;
+      }
+
       if (amt > 0) {
         cumulativeTotalEarned += amt;
         if (evt.type === 'level_income') accumulatedLevelIncome += amt;
