@@ -656,7 +656,7 @@ export function generateEventsList(
         : cumulativeTotalEarned;
       const packageEndIncome = (orig && orig.packageEndIncome !== undefined)
         ? Number(orig.packageEndIncome)
-        : (cumulativeTotalEarned + evt.amount * 2.2);
+        : (currentDeposit * 2.2);
 
       const isActiveOnChain = (orig && orig.active !== undefined) ? Boolean(orig.active) : true;
 
