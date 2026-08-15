@@ -46,7 +46,7 @@ export default function Dashboard() {
   const [onChainEvents, setOnChainEvents] = useState([]);
   const [copyText, setCopyText] = useState("Copy");
   const [isWrongNetwork, setIsWrongNetwork] = useState(false);
-  const [targetChainId, setTargetChainId] = useState(97n);
+  const [targetChainId, setTargetChainId] = useState(56n);
 
   const [showSettings, setShowSettings] = useState(false);
   const [showMissedTxModal, setShowMissedTxModal] = useState(false);
@@ -447,7 +447,20 @@ export default function Dashboard() {
           }
         } catch (switchError) {
           if (switchError.code === 4902) {
-            if (targetChainId === 97n) {
+            if (targetChainId === 56n) {
+              await window.ethereum.request({
+                method: "wallet_addEthereumChain",
+                params: [
+                  {
+                    chainId: "0x38",
+                    chainName: "BNB Smart Chain Mainnet",
+                    nativeCurrency: { name: "BNB", symbol: "BNB", decimals: 18 },
+                    rpcUrls: ["https://bsc-dataseed.binance.org/"],
+                    blockExplorerUrls: ["https://bscscan.com"]
+                  }
+                ]
+              });
+            } else if (targetChainId === 97n) {
               await window.ethereum.request({
                 method: "wallet_addEthereumChain",
                 params: [
@@ -1866,6 +1879,7 @@ export default function Dashboard() {
             handleDeposit={handleDeposit}
             handleMintUSDT={handleMintUSDT}
             loading={loading}
+            targetChainId={targetChainId}
           />
         )}
 

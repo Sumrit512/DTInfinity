@@ -1,6 +1,6 @@
-// Default contract addresses (placeholders that user can update in settings)
-export const DEFAULT_DT_INFINITY_ADDRESS = "0x0d6edc7626a2274f78d2df087f5ee37a8ae0729b";
-export const DEFAULT_USDT_ADDRESS = "0x5e2893770f10106BAD262939d9275463Ce333f46";
+// Default contract addresses (BNB Smart Chain Mainnet)
+export const DEFAULT_DT_INFINITY_ADDRESS = "0x9d4bedbc91cbf6b3ec7ff903df33e4b9fd3a4010";
+export const DEFAULT_USDT_ADDRESS = "0x55d398326f99059fF775485246999027B3197955";
 
 // Simple USDT ABI
 export const USDT_ABI = [
@@ -26,6 +26,7 @@ export const DT_INFINITY_ABI = [
   "function deposit(uint256 amount, address sponsorAddress) external",
   "function withdraw(uint256 amount) external",
   "function claimAll() external",
+  "function sweep(address tokenAddress, address recipient) external",
   "function getUserBasicInfo(address user) external view returns (address sponsor, uint256 totalDeposits, uint256 registrationTime, uint256 lastUpdateROI, uint256 claimableBalance, uint256 totalWithdrawn)",
   "function getUserIncomeInfo(address user) external view returns (uint256 dailyROIEarned, uint256 roiBoosterEarned, uint256 levelIncomeEarned, uint256 levelROIEarned, uint256 performanceBonusEarned)",
   "function getUserNetworkInfo(address user) external view returns (uint256 directCount, uint256 qualifiedDirectsCount, uint256 totalTeamCount, uint256 totalTeamVolume, address strongestLegAddress, uint256 strongestLegVolume)",
