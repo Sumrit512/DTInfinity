@@ -12,13 +12,11 @@ const TOPICS = {
   BoosterROIAccumulated:   "0xfab43346c131db806194631ab6869e03ac6353295532967db4e0f925c0ab55b6",
 };
 
-const BSC_RPCS = [
-  "https://bsc-dataseed.binance.org",
-  "https://bsc-dataseed1.defibit.io",
-  "https://bsc-dataseed1.ninicoin.io",
-  "https://bsc-dataseed2.binance.org",
-  "https://bsc-rpc.publicnode.com",
+const BSC_TESTNET_RPCS = [
   "https://data-seed-prebsc-1-s1.bnbchain.org:8545",
+  "https://data-seed-prebsc-2-s1.bnbchain.org:8545",
+  "https://data-seed-prebsc-1-s2.bnbchain.org:8545",
+  "https://data-seed-prebsc-2-s2.bnbchain.org:8545",
   "https://bsc-testnet-rpc.publicnode.com",
 ];
 
@@ -36,7 +34,7 @@ async function rpcRequest(rpcUrl, method, params) {
 
 async function rpcRequestWithFallback(method, params) {
   let lastErr;
-  for (const rpc of BSC_RPCS) {
+  for (const rpc of BSC_TESTNET_RPCS) {
     try {
       return await rpcRequest(rpc, method, params);
     } catch (e) {

@@ -178,7 +178,7 @@ export const syncMissedTx = action({
     rpcUrl: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const rpc = args.rpcUrl || "https://bsc-dataseed.binance.org";
+    const rpc = args.rpcUrl || "https://data-seed-prebsc-1-s1.binance.org:8545";
     const txHash = args.txHash.toLowerCase();
     const dtInfinityAddress = args.dtInfinityAddress.toLowerCase();
     
