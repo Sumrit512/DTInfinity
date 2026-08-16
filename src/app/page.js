@@ -460,6 +460,19 @@ export default function Dashboard() {
                   }
                 ]
               });
+            } else if (targetChainId === 56n) {
+              await window.ethereum.request({
+                method: "wallet_addEthereumChain",
+                params: [
+                  {
+                    chainId: "0x38",
+                    chainName: "BNB Smart Chain Mainnet",
+                    nativeCurrency: { name: "BNB", symbol: "BNB", decimals: 18 },
+                    rpcUrls: ["https://bsc-dataseed.binance.org/"],
+                    blockExplorerUrls: ["https://bscscan.com"]
+                  }
+                ]
+              });
             }
             setIsWrongNetwork(false);
             if (walletAddress) {
