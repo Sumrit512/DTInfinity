@@ -41,12 +41,12 @@ export default function Dashboard() {
   const [activeView, setActiveView] = useState("dashboard");
   const [walletConnected, setWalletConnected] = useState(false);
   const [walletAddress, setWalletAddress] = useState("");
-  const [networkName, setNetworkName] = useState("BEP-20 · BSC Testnet");
+  const [networkName, setNetworkName] = useState("BEP-20 · BSC Mainnet");
   const [loading, setLoading] = useState(false);
   const [onChainEvents, setOnChainEvents] = useState([]);
   const [copyText, setCopyText] = useState("Copy");
   const [isWrongNetwork, setIsWrongNetwork] = useState(false);
-  const [targetChainId, setTargetChainId] = useState(97n);
+  const [targetChainId, setTargetChainId] = useState(56n);
 
   const [showSettings, setShowSettings] = useState(false);
   const [showMissedTxModal, setShowMissedTxModal] = useState(false);
