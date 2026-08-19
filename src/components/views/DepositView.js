@@ -116,31 +116,6 @@ export default function DepositView({
             {loading ? "Processing Deposit..." : "Approve & Deposit USDT"}
           </button>
         </form>
-
-        <div style={{ marginTop: "32px", paddingTop: "24px", borderTop: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "16px" }}>
-          <div>
-            <div style={{ fontSize: "13.5px", fontWeight: "700", color: "#fff", marginBottom: "2px" }}>Need Test Tokens?</div>
-            <div style={{ fontSize: "12.5px", color: "var(--text-muted)" }}>Mint 500 Mock USDT to test deposits on BSC Testnet.</div>
-          </div>
-          <button
-            onClick={handleMintUSDT}
-            className="copy-btn"
-            disabled={loading}
-            style={{
-              padding: "10px 18px",
-              fontSize: "13px",
-              fontWeight: "700",
-              background: "var(--surface-2)",
-              color: "var(--blue-bright)",
-              border: "1px solid var(--border)",
-              borderRadius: "8px",
-              cursor: "pointer",
-              transition: "all 0.2s ease"
-            }}
-          >
-            Mint 50000 Test USDT
-          </button>
-        </div>
       </div>
     </div>
   );
